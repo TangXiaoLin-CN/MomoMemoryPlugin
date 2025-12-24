@@ -12,23 +12,20 @@ using System;
 using System.Runtime.InteropServices;
 
 public class BackgroundClicker {
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
     [DllImport("user32.dll")]
     public static extern IntPtr PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
-    public static extern IntPtr ChildWindowFromPoint(IntPtr hWndParent, POINT Point);
-
-    [DllImport("user32.dll")]
-    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+    public static extern IntPtr ChildWindowFromPointEx(IntPtr hWndParent, POINT pt, uint uFlags);
 
     [DllImport("user32.dll")]
     public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
 
     [DllImport("user32.dll")]
-    public static extern IntPtr WindowFromPoint(POINT Point);
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT {
@@ -41,46 +38,78 @@ public class BackgroundClicker {
     public const uint WM_LBUTTONUP = 0x0202;
     public const uint WM_RBUTTONDOWN = 0x0204;
     public const uint WM_RBUTTONUP = 0x0205;
+    public const uint WM_MOUSEMOVE = 0x0200;
     public const uint MK_LBUTTON = 0x0001;
     public const uint MK_RBUTTON = 0x0002;
-    public const uint GA_ROOT = 2;
+    public const uint CWP_ALL = 0x0000;
+    public const uint CWP_SKIPDISABLED = 0x0002;
+    public const uint CWP_SKIPINVISIBLE = 0x0001;
 
     public static IntPtr MakeLParam(int x, int y) {
         return (IntPtr)((y << 16) | (x & 0xFFFF));
     }
 
-    public static void BackgroundClick(IntPtr parentHwnd, int relX, int relY, bool rightClick = false) {
-        // Find the child window at the click point
-        POINT pt = new POINT(relX, relY);
-        IntPtr targetHwnd = ChildWindowFromPoint(parentHwnd, pt);
+    public static void BackgroundClick(IntPtr parentHwnd, int clientX, int clientY, bool rightClick = false) {
+        // Try to find the deepest child window at this point
+        POINT pt = new POINT(clientX, clientY);
+        IntPtr targetHwnd = ChildWindowFromPointEx(parentHwnd, pt, CWP_SKIPINVISIBLE);
 
-        if (targetHwnd == IntPtr.Zero) {
+        int targetX = clientX;
+        int targetY = clientY;
+
+        // If we found a child window, convert coordinates
+        if (targetHwnd != IntPtr.Zero && targetHwnd != parentHwnd) {
+            // Convert from parent client to screen
+            POINT screenPt = new POINT(clientX, clientY);
+            ClientToScreen(parentHwnd, ref screenPt);
+            // Convert from screen to child client
+            ScreenToClient(targetHwnd, ref screenPt);
+            targetX = screenPt.X;
+            targetY = screenPt.Y;
+        } else {
             targetHwnd = parentHwnd;
         }
 
-        // Convert coordinates to target window's client coordinates
-        POINT screenPt = new POINT(relX, relY);
-        ClientToScreen(parentHwnd, ref screenPt);
-        ScreenToClient(targetHwnd, ref screenPt);
+        IntPtr lParam = MakeLParam(targetX, targetY);
 
-        IntPtr lParam = MakeLParam(screenPt.X, screenPt.Y);
-        IntPtr wParam = rightClick ? (IntPtr)MK_RBUTTON : (IntPtr)MK_LBUTTON;
+        // Send mouse move first
+        PostMessage(targetHwnd, WM_MOUSEMOVE, IntPtr.Zero, lParam);
+        System.Threading.Thread.Sleep(10);
 
         if (rightClick) {
-            PostMessage(targetHwnd, WM_RBUTTONDOWN, wParam, lParam);
-            System.Threading.Thread.Sleep(50);
+            PostMessage(targetHwnd, WM_RBUTTONDOWN, (IntPtr)MK_RBUTTON, lParam);
+            System.Threading.Thread.Sleep(30);
             PostMessage(targetHwnd, WM_RBUTTONUP, IntPtr.Zero, lParam);
         } else {
-            PostMessage(targetHwnd, WM_LBUTTONDOWN, wParam, lParam);
-            System.Threading.Thread.Sleep(50);
+            PostMessage(targetHwnd, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, lParam);
+            System.Threading.Thread.Sleep(30);
             PostMessage(targetHwnd, WM_LBUTTONUP, IntPtr.Zero, lParam);
+        }
+    }
+
+    // Alternative: click directly to parent window without child lookup
+    public static void DirectClick(IntPtr hwnd, int clientX, int clientY, bool rightClick = false) {
+        IntPtr lParam = MakeLParam(clientX, clientY);
+
+        PostMessage(hwnd, WM_MOUSEMOVE, IntPtr.Zero, lParam);
+        System.Threading.Thread.Sleep(10);
+
+        if (rightClick) {
+            PostMessage(hwnd, WM_RBUTTONDOWN, (IntPtr)MK_RBUTTON, lParam);
+            System.Threading.Thread.Sleep(30);
+            PostMessage(hwnd, WM_RBUTTONUP, IntPtr.Zero, lParam);
+        } else {
+            PostMessage(hwnd, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, lParam);
+            System.Threading.Thread.Sleep(30);
+            PostMessage(hwnd, WM_LBUTTONUP, IntPtr.Zero, lParam);
         }
     }
 }
 "@
 
 $hwnd = [IntPtr]${hwnd}
-[BackgroundClicker]::BackgroundClick($hwnd, ${x}, ${y}, ${button === 'right' ? '$true' : '$false'})
+# Try direct click first (simpler, works for many apps)
+[BackgroundClicker]::DirectClick($hwnd, ${x}, ${y}, ${button === 'right' ? '$true' : '$false'})
 @{ success = $true } | ConvertTo-Json -Compress
 `;
 

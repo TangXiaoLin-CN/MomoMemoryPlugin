@@ -159,6 +159,12 @@
           "type": "array",
           "default": [],
           "description": "Coordinate aliases to show as status bar buttons"
+        },
+        "momo.clickMode": {
+          "type": "string",
+          "enum": ["background", "foreground"],
+          "default": "foreground",
+          "description": "Click mode: 'background' sends message without moving mouse (may not work for all apps), 'foreground' moves mouse and clicks (always works)"
         }
       }
     }

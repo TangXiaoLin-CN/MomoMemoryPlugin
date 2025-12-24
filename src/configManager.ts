@@ -161,6 +161,14 @@ export class ConfigManager {
   }
 
   /**
+   * Get click mode
+   */
+  public getClickMode(): 'background' | 'foreground' {
+    const config = this.getConfig();
+    return config.get<'background' | 'foreground'>('clickMode', 'foreground');
+  }
+
+  /**
    * Add a button to status bar
    */
   public async addStatusBarButton(alias: string): Promise<void> {

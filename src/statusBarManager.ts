@@ -263,16 +263,30 @@ export class StatusBarManager {
       return;
     }
 
-    // Background click - doesn't move mouse
-    await this.mouseController.backgroundClick(
-      targetWindow.hwnd,
-      coordinate.x,
-      coordinate.y
-    );
+    const clickMode = this.configManager.getClickMode();
 
-    vscode.window.showInformationMessage(
-      `Clicked "${alias}" at relative (${coordinate.x}, ${coordinate.y})`
-    );
+    if (clickMode === 'background') {
+      // Background click - doesn't move mouse (may not work for all apps)
+      await this.mouseController.backgroundClick(
+        targetWindow.hwnd,
+        coordinate.x,
+        coordinate.y
+      );
+      vscode.window.showInformationMessage(
+        `Background clicked "${alias}" at (${coordinate.x}, ${coordinate.y})`
+      );
+    } else {
+      // Foreground click - moves mouse and clicks (always works)
+      await this.mouseController.clickRelative(
+        windowRect.x,
+        windowRect.y,
+        coordinate.x,
+        coordinate.y
+      );
+      vscode.window.showInformationMessage(
+        `Clicked "${alias}" at (${windowRect.x + coordinate.x}, ${windowRect.y + coordinate.y})`
+      );
+    }
   }
 
   /**
