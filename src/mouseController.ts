@@ -126,19 +126,60 @@ using System;
 using System.Runtime.InteropServices;
 
 public class MC${uid} {
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetCursorPos(int X, int Y);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
     [DllImport("user32.dll")]
-    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, IntPtr dwExtraInfo);
+    public static extern IntPtr GetMessageExtraInfo();
+
+    public const int INPUT_MOUSE = 0;
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT {
+        public int type;
+        public MOUSEINPUT mi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    public static void Click(int x, int y, bool rightClick) {
+        SetCursorPos(x, y);
+        System.Threading.Thread.Sleep(50);
+
+        uint downFlag = rightClick ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
+        uint upFlag = rightClick ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
+
+        INPUT[] inputs = new INPUT[2];
+
+        inputs[0].type = INPUT_MOUSE;
+        inputs[0].mi.dwFlags = downFlag;
+        inputs[0].mi.dwExtraInfo = GetMessageExtraInfo();
+
+        inputs[1].type = INPUT_MOUSE;
+        inputs[1].mi.dwFlags = upFlag;
+        inputs[1].mi.dwExtraInfo = GetMessageExtraInfo();
+
+        SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT)));
+    }
 }
 "@
 
-$null = [MC${uid}]::SetCursorPos(${x}, ${y})
-Start-Sleep -Milliseconds 50
-[MC${uid}]::mouse_event(${downFlag}, 0, 0, 0, [IntPtr]::Zero)
-Start-Sleep -Milliseconds 30
-[MC${uid}]::mouse_event(${upFlag}, 0, 0, 0, [IntPtr]::Zero)
+[MC${uid}]::Click(${x}, ${y}, ${button === 'right' ? '$true' : '$false'})
 @{ success = $true } | ConvertTo-Json -Compress
 `;
 };
