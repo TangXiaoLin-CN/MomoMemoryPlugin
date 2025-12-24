@@ -116,102 +116,77 @@ $hwnd = [IntPtr]${hwnd}
 /**
  * PowerShell script template for mouse click (moves mouse)
  */
-const MOUSE_CLICK_SCRIPT = (x: number, y: number, button: 'left' | 'right' = 'left') => `
-Add-Type @"
+const MOUSE_CLICK_SCRIPT = (x: number, y: number, button: 'left' | 'right' = 'left') => {
+  const uid = Date.now();
+  const downFlag = button === 'right' ? '0x0008' : '0x0002';
+  const upFlag = button === 'right' ? '0x0010' : '0x0004';
+  return `
+Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 
-public class MouseHelper {
+public class MC${uid} {
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int X, int Y);
 
     [DllImport("user32.dll")]
-    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
-
-    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
-    public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
-    public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
-    public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
-    public const uint MOUSEEVENTF_MOVE = 0x0001;
-
-    public static void Click(int x, int y, bool rightClick = false) {
-        SetCursorPos(x, y);
-        System.Threading.Thread.Sleep(50);
-        if (rightClick) {
-            mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
-            mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
-        } else {
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        }
-    }
-
-    public static void DoubleClick(int x, int y) {
-        SetCursorPos(x, y);
-        System.Threading.Thread.Sleep(50);
-        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        System.Threading.Thread.Sleep(100);
-        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-    }
-
-    public static void MoveTo(int x, int y) {
-        SetCursorPos(x, y);
-    }
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, IntPtr dwExtraInfo);
 }
 "@
 
-[MouseHelper]::${button === 'right' ? 'Click(' + x + ', ' + y + ', $true)' : 'Click(' + x + ', ' + y + ')'}
+$null = [MC${uid}]::SetCursorPos(${x}, ${y})
+Start-Sleep -Milliseconds 50
+[MC${uid}]::mouse_event(${downFlag}, 0, 0, 0, [IntPtr]::Zero)
+Start-Sleep -Milliseconds 30
+[MC${uid}]::mouse_event(${upFlag}, 0, 0, 0, [IntPtr]::Zero)
 @{ success = $true } | ConvertTo-Json -Compress
 `;
+};
 
-const MOUSE_DOUBLE_CLICK_SCRIPT = (x: number, y: number) => `
-Add-Type @"
+const MOUSE_DOUBLE_CLICK_SCRIPT = (x: number, y: number) => {
+  const uid = Date.now();
+  return `
+Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 
-public class MouseHelper {
+public class MDC${uid} {
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int X, int Y);
 
     [DllImport("user32.dll")]
-    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
-
-    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
-
-    public static void DoubleClick(int x, int y) {
-        SetCursorPos(x, y);
-        System.Threading.Thread.Sleep(50);
-        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        System.Threading.Thread.Sleep(100);
-        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-    }
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, IntPtr dwExtraInfo);
 }
 "@
 
-[MouseHelper]::DoubleClick(${x}, ${y})
+$null = [MDC${uid}]::SetCursorPos(${x}, ${y})
+Start-Sleep -Milliseconds 50
+[MDC${uid}]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)
+[MDC${uid}]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
+Start-Sleep -Milliseconds 100
+[MDC${uid}]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)
+[MDC${uid}]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
 @{ success = $true } | ConvertTo-Json -Compress
 `;
+};
 
-const MOUSE_MOVE_SCRIPT = (x: number, y: number) => `
-Add-Type @"
+const MOUSE_MOVE_SCRIPT = (x: number, y: number) => {
+  const uid = Date.now();
+  return `
+Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 
-public class MouseHelper {
+public class MM${uid} {
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int X, int Y);
 }
 "@
 
-[MouseHelper]::SetCursorPos(${x}, ${y})
+$null = [MM${uid}]::SetCursorPos(${x}, ${y})
 @{ success = $true } | ConvertTo-Json -Compress
 `;
+};
 
 export type MouseButton = 'left' | 'right';
 
