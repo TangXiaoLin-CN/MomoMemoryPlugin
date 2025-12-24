@@ -256,23 +256,22 @@ export class StatusBarManager {
       return;
     }
 
-    // Get window rect
+    // Verify window is still valid
     const windowRect = await this.windowManager.getWindowRect(targetWindow.hwnd);
     if (!windowRect) {
       vscode.window.showErrorMessage('Target window not found');
       return;
     }
 
-    // Click
-    await this.mouseController.clickRelative(
-      windowRect.x,
-      windowRect.y,
+    // Background click - doesn't move mouse
+    await this.mouseController.backgroundClick(
+      targetWindow.hwnd,
       coordinate.x,
       coordinate.y
     );
 
     vscode.window.showInformationMessage(
-      `Clicked "${alias}" at (${windowRect.x + coordinate.x}, ${windowRect.y + coordinate.y})`
+      `Clicked "${alias}" at relative (${coordinate.x}, ${coordinate.y})`
     );
   }
 

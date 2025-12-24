@@ -4,7 +4,88 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 /**
- * PowerShell script template for mouse click
+ * PowerShell script for background click (sends message to window without moving mouse)
+ */
+const BACKGROUND_CLICK_SCRIPT = (hwnd: number, x: number, y: number, button: 'left' | 'right' = 'left') => `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public class BackgroundClicker {
+    [DllImport("user32.dll")]
+    public static extern IntPtr PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr ChildWindowFromPoint(IntPtr hWndParent, POINT Point);
+
+    [DllImport("user32.dll")]
+    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT Point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT {
+        public int X;
+        public int Y;
+        public POINT(int x, int y) { X = x; Y = y; }
+    }
+
+    public const uint WM_LBUTTONDOWN = 0x0201;
+    public const uint WM_LBUTTONUP = 0x0202;
+    public const uint WM_RBUTTONDOWN = 0x0204;
+    public const uint WM_RBUTTONUP = 0x0205;
+    public const uint MK_LBUTTON = 0x0001;
+    public const uint MK_RBUTTON = 0x0002;
+    public const uint GA_ROOT = 2;
+
+    public static IntPtr MakeLParam(int x, int y) {
+        return (IntPtr)((y << 16) | (x & 0xFFFF));
+    }
+
+    public static void BackgroundClick(IntPtr parentHwnd, int relX, int relY, bool rightClick = false) {
+        // Find the child window at the click point
+        POINT pt = new POINT(relX, relY);
+        IntPtr targetHwnd = ChildWindowFromPoint(parentHwnd, pt);
+
+        if (targetHwnd == IntPtr.Zero) {
+            targetHwnd = parentHwnd;
+        }
+
+        // Convert coordinates to target window's client coordinates
+        POINT screenPt = new POINT(relX, relY);
+        ClientToScreen(parentHwnd, ref screenPt);
+        ScreenToClient(targetHwnd, ref screenPt);
+
+        IntPtr lParam = MakeLParam(screenPt.X, screenPt.Y);
+        IntPtr wParam = rightClick ? (IntPtr)MK_RBUTTON : (IntPtr)MK_LBUTTON;
+
+        if (rightClick) {
+            PostMessage(targetHwnd, WM_RBUTTONDOWN, wParam, lParam);
+            System.Threading.Thread.Sleep(50);
+            PostMessage(targetHwnd, WM_RBUTTONUP, IntPtr.Zero, lParam);
+        } else {
+            PostMessage(targetHwnd, WM_LBUTTONDOWN, wParam, lParam);
+            System.Threading.Thread.Sleep(50);
+            PostMessage(targetHwnd, WM_LBUTTONUP, IntPtr.Zero, lParam);
+        }
+    }
+}
+"@
+
+$hwnd = [IntPtr]${hwnd}
+[BackgroundClicker]::BackgroundClick($hwnd, ${x}, ${y}, ${button === 'right' ? '$true' : '$false'})
+@{ success = $true } | ConvertTo-Json -Compress
+`;
+
+/**
+ * PowerShell script template for mouse click (moves mouse)
  */
 const MOUSE_CLICK_SCRIPT = (x: number, y: number, button: 'left' | 'right' = 'left') => `
 Add-Type @"
@@ -193,6 +274,18 @@ export class MouseController {
     const absoluteX = windowX + relativeX;
     const absoluteY = windowY + relativeY;
     await this.click(absoluteX, absoluteY, button);
+  }
+
+  /**
+   * Background click - sends click message to window without moving mouse
+   */
+  public async backgroundClick(
+    hwnd: number,
+    relativeX: number,
+    relativeY: number,
+    button: MouseButton = 'left'
+  ): Promise<void> {
+    await this.executePowerShell(BACKGROUND_CLICK_SCRIPT(hwnd, relativeX, relativeY, button));
   }
 
   /**
