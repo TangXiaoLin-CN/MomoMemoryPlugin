@@ -1,4 +1,4 @@
-import { createWorker, Worker, OEM, PSM } from 'tesseract.js';
+import { createWorker, Worker } from 'tesseract.js';
 import { OCRResult } from './types';
 
 export class OCRService {
@@ -48,18 +48,12 @@ export class OCRService {
       const langString = languages.join('+');
       console.log(`OCRService: Initializing with languages: ${langString}`);
 
-      this.worker = await createWorker(langString, OEM.LSTM_ONLY, {
+      this.worker = await createWorker(langString, 1, {
         logger: (m) => {
           if (m.status === 'recognizing text') {
             // Progress update
           }
         },
-      });
-
-      // Set parameters for better recognition
-      await this.worker.setParameters({
-        tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
-        preserve_interword_spaces: '1',
       });
 
       this.currentLanguages = [...languages];

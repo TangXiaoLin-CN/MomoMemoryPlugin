@@ -21,142 +21,150 @@ export async function activate(context: vscode.ExtensionContext) {
     return;
   }
 
-  // Initialize managers
-  const windowManager = WindowManager.getInstance();
-  const configManager = ConfigManager.getInstance();
-  coordinatePicker = CoordinatePicker.getInstance();
-  statusBarManager = StatusBarManager.getInstance();
+  try {
+    // Initialize managers
+    const windowManager = WindowManager.getInstance();
+    const configManager = ConfigManager.getInstance();
+    coordinatePicker = CoordinatePicker.getInstance();
+    statusBarManager = StatusBarManager.getInstance();
 
-  // Initialize status bar
-  await statusBarManager.initialize();
+    // Register commands first (before any async initialization)
+    const selectWindowCommand = vscode.commands.registerCommand(
+      'momo.selectWindow',
+      async () => {
+        await selectWindow(windowManager, configManager);
+      }
+    );
 
-  // Register commands
-  const selectWindowCommand = vscode.commands.registerCommand(
-    'momo.selectWindow',
-    async () => {
-      await selectWindow(windowManager, configManager);
-    }
-  );
+    const pickCoordinateCommand = vscode.commands.registerCommand(
+      'momo.pickCoordinate',
+      async () => {
+        await coordinatePicker.startPicking();
+      }
+    );
 
-  const pickCoordinateCommand = vscode.commands.registerCommand(
-    'momo.pickCoordinate',
-    async () => {
-      await coordinatePicker.startPicking();
-    }
-  );
+    const captureOCRCommand = vscode.commands.registerCommand(
+      'momo.captureOCR',
+      async () => {
+        const result = await statusBarManager.performOCR();
+        if (result && result.text) {
+          // Show result in info message with option to copy
+          const action = await vscode.window.showInformationMessage(
+            `OCR Result: ${result.text}`,
+            'Copy to Clipboard'
+          );
+          if (action === 'Copy to Clipboard') {
+            await vscode.env.clipboard.writeText(result.text);
+            vscode.window.showInformationMessage('OCR result copied to clipboard');
+          }
+        }
+      }
+    );
 
-  const captureOCRCommand = vscode.commands.registerCommand(
-    'momo.captureOCR',
-    async () => {
-      const result = await statusBarManager.performOCR();
-      if (result && result.text) {
-        // Show result in info message with option to copy
-        const action = await vscode.window.showInformationMessage(
-          `OCR Result: ${result.text}`,
-          'Copy to Clipboard'
+    const clickPointCommand = vscode.commands.registerCommand(
+      'momo.clickPoint',
+      async (alias?: string) => {
+        if (!alias) {
+          // Show picker if no alias provided
+          const coordinates = configManager.getCoordinates();
+          if (coordinates.length === 0) {
+            vscode.window.showInformationMessage('No coordinates saved yet.');
+            return;
+          }
+
+          const items = coordinates.map((c) => ({
+            label: c.alias,
+            description: `(${c.x}, ${c.y})`,
+          }));
+
+          const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select a coordinate to click',
+          });
+
+          if (selected) {
+            alias = selected.label;
+          }
+        }
+
+        if (alias) {
+          await statusBarManager.clickCoordinate(alias);
+        }
+      }
+    );
+
+    const openSettingsCommand = vscode.commands.registerCommand(
+      'momo.openSettings',
+      async () => {
+        await vscode.commands.executeCommand(
+          'workbench.action.openSettings',
+          'momo'
         );
-        if (action === 'Copy to Clipboard') {
-          await vscode.env.clipboard.writeText(result.text);
-          vscode.window.showInformationMessage('OCR result copied to clipboard');
-        }
       }
-    }
-  );
+    );
 
-  const clickPointCommand = vscode.commands.registerCommand(
-    'momo.clickPoint',
-    async (alias?: string) => {
-      if (!alias) {
-        // Show picker if no alias provided
-        const coordinates = configManager.getCoordinates();
-        if (coordinates.length === 0) {
-          vscode.window.showInformationMessage('No coordinates saved yet.');
-          return;
-        }
-
-        const items = coordinates.map((c) => ({
-          label: c.alias,
-          description: `(${c.x}, ${c.y})`,
-        }));
-
-        const selected = await vscode.window.showQuickPick(items, {
-          placeHolder: 'Select a coordinate to click',
-        });
-
-        if (selected) {
-          alias = selected.label;
-        }
+    const startOCRMonitorCommand = vscode.commands.registerCommand(
+      'momo.startOCRMonitor',
+      async () => {
+        await statusBarManager.startOCRMonitor();
       }
+    );
 
-      if (alias) {
-        await statusBarManager.clickCoordinate(alias);
+    const stopOCRMonitorCommand = vscode.commands.registerCommand(
+      'momo.stopOCRMonitor',
+      () => {
+        statusBarManager.stopOCRMonitor();
       }
-    }
-  );
+    );
 
-  const openSettingsCommand = vscode.commands.registerCommand(
-    'momo.openSettings',
-    async () => {
-      await vscode.commands.executeCommand(
-        'workbench.action.openSettings',
-        'momo'
-      );
-    }
-  );
+    const manageCoordinatesCommand = vscode.commands.registerCommand(
+      'momo.manageCoordinates',
+      async () => {
+        await coordinatePicker.manageCoordinates();
+      }
+    );
 
-  const startOCRMonitorCommand = vscode.commands.registerCommand(
-    'momo.startOCRMonitor',
-    async () => {
-      await statusBarManager.startOCRMonitor();
-    }
-  );
+    // Register all disposables
+    context.subscriptions.push(
+      selectWindowCommand,
+      pickCoordinateCommand,
+      captureOCRCommand,
+      clickPointCommand,
+      openSettingsCommand,
+      startOCRMonitorCommand,
+      stopOCRMonitorCommand,
+      manageCoordinatesCommand
+    );
 
-  const stopOCRMonitorCommand = vscode.commands.registerCommand(
-    'momo.stopOCRMonitor',
-    () => {
-      statusBarManager.stopOCRMonitor();
-    }
-  );
+    // Initialize status bar (async, don't block)
+    statusBarManager.initialize().catch((err) => {
+      console.error('Failed to initialize status bar:', err);
+    });
 
-  const manageCoordinatesCommand = vscode.commands.registerCommand(
-    'momo.manageCoordinates',
-    async () => {
-      await coordinatePicker.manageCoordinates();
-    }
-  );
+    // Listen to config changes
+    const configChangeListener = configManager.onConfigChange(async (e) => {
+      if (e.affectsConfiguration('momo.statusBarButtons')) {
+        await statusBarManager.updateCoordinateButtons();
+      }
+      if (e.affectsConfiguration('momo.targetWindow')) {
+        statusBarManager.updateWindowStatus();
+      }
+      if (e.affectsConfiguration('momo.ocrLanguages')) {
+        const languages = configManager.getOCRLanguages();
+        const ocrService = OCRService.getInstance();
+        await ocrService.setLanguages(languages);
+      }
+    });
 
-  // Listen to config changes
-  const configChangeListener = configManager.onConfigChange(async (e) => {
-    if (e.affectsConfiguration('momo.statusBarButtons')) {
-      await statusBarManager.updateCoordinateButtons();
-    }
-    if (e.affectsConfiguration('momo.targetWindow')) {
-      statusBarManager.updateWindowStatus();
-    }
-    if (e.affectsConfiguration('momo.ocrLanguages')) {
-      const languages = configManager.getOCRLanguages();
-      const ocrService = OCRService.getInstance();
-      await ocrService.setLanguages(languages);
-    }
-  });
+    context.subscriptions.push(configChangeListener);
 
-  // Register all disposables
-  context.subscriptions.push(
-    selectWindowCommand,
-    pickCoordinateCommand,
-    captureOCRCommand,
-    clickPointCommand,
-    openSettingsCommand,
-    startOCRMonitorCommand,
-    stopOCRMonitorCommand,
-    manageCoordinatesCommand,
-    configChangeListener
-  );
-
-  // Show welcome message
-  vscode.window.showInformationMessage(
-    'Momo Memory Plugin activated. Use Ctrl+Alt+W to select a window.'
-  );
+    // Show welcome message
+    vscode.window.showInformationMessage(
+      'Momo Memory Plugin activated. Use Ctrl+Alt+W to select a window.'
+    );
+  } catch (error) {
+    console.error('Failed to activate Momo Memory Plugin:', error);
+    vscode.window.showErrorMessage(`Momo Memory Plugin activation failed: ${error}`);
+  }
 }
 
 /**
