@@ -9,7 +9,8 @@
       "Bash(cmd /c:*)",
       "Bash(npx vsce package:*)",
       "Bash(ls:*)",
-      "Bash(npx @vscode/vsce package:*)"
+      "Bash(npx @vscode/vsce package:*)",
+      "Bash(npm ls:*)"
     ]
   }
 }
