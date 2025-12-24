@@ -8,3 +8,4 @@ tsconfig.json
 node_modules/**
 !node_modules/tesseract.js/**
 !node_modules/tesseract.js-core/**
+!node_modules/regenerator-runtime/**

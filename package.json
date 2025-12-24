@@ -11,7 +11,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "*"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -175,7 +175,8 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "tesseract.js": "^5.0.4"
+    "tesseract.js": "^5.0.4",
+    "regenerator-runtime": "^0.14.1"
   },
   "optionalDependencies": {
     "robotjs": "^0.6.0"
