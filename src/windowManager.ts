@@ -224,10 +224,12 @@ export class WindowManager {
    * Execute PowerShell script and return result
    */
   private async executePowerShell<T>(script: string): Promise<T> {
-    const encodedCommand = Buffer.from(script, 'utf16le').toString('base64');
+    // Add UTF-8 encoding to script
+    const fullScript = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n${script}`;
+    const encodedCommand = Buffer.from(fullScript, 'utf16le').toString('base64');
     const { stdout } = await execAsync(
       `powershell -NoProfile -NonInteractive -EncodedCommand ${encodedCommand}`,
-      { maxBuffer: 10 * 1024 * 1024 }
+      { maxBuffer: 10 * 1024 * 1024, encoding: 'utf8' }
     );
     return JSON.parse(stdout.trim());
   }
