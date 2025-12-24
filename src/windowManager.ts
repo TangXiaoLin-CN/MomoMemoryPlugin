@@ -123,7 +123,7 @@ public class WinAPI {
 $hwnd = [IntPtr]${hwnd}
 if ([WinAPI]::IsWindow($hwnd)) {
     $rect = New-Object WinAPI+RECT
-    [WinAPI]::GetWindowRect($hwnd, [ref]$rect)
+    $null = [WinAPI]::GetWindowRect($hwnd, [ref]$rect)
     @{
         x = $rect.Left
         y = $rect.Top
@@ -157,7 +157,7 @@ public class CursorHelper {
 "@
 
 $point = New-Object CursorHelper+POINT
-[CursorHelper]::GetCursorPos([ref]$point)
+$null = [CursorHelper]::GetCursorPos([ref]$point)
 @{ x = $point.X; y = $point.Y } | ConvertTo-Json -Compress
 `;
 
