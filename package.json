@@ -1,0 +1,183 @@
+{
+  "name": "momo-memory-plugin",
+  "displayName": "Momo Memory Plugin",
+  "description": "Window automation helper - capture window info, record coordinates, OCR text recognition",
+  "version": "0.0.1",
+  "publisher": "momo",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "momo.selectWindow",
+        "title": "Momo: Select Target Window"
+      },
+      {
+        "command": "momo.pickCoordinate",
+        "title": "Momo: Pick Coordinate"
+      },
+      {
+        "command": "momo.captureOCR",
+        "title": "Momo: Capture OCR"
+      },
+      {
+        "command": "momo.clickPoint",
+        "title": "Momo: Click Point"
+      },
+      {
+        "command": "momo.openSettings",
+        "title": "Momo: Open Settings"
+      },
+      {
+        "command": "momo.startOCRMonitor",
+        "title": "Momo: Start OCR Monitor"
+      },
+      {
+        "command": "momo.stopOCRMonitor",
+        "title": "Momo: Stop OCR Monitor"
+      },
+      {
+        "command": "momo.manageCoordinates",
+        "title": "Momo: Manage Coordinates"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "momo.selectWindow",
+        "key": "ctrl+alt+w",
+        "when": "!editorFocus"
+      },
+      {
+        "command": "momo.pickCoordinate",
+        "key": "ctrl+alt+p",
+        "when": "!editorFocus"
+      },
+      {
+        "command": "momo.captureOCR",
+        "key": "ctrl+alt+o",
+        "when": "!editorFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Momo Memory Plugin",
+      "properties": {
+        "momo.targetWindow": {
+          "type": "object",
+          "default": {
+            "title": "",
+            "processName": "",
+            "hwnd": 0
+          },
+          "description": "Target window configuration",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Window title to match"
+            },
+            "processName": {
+              "type": "string",
+              "description": "Process name to match"
+            },
+            "hwnd": {
+              "type": "number",
+              "description": "Window handle (auto-filled)"
+            }
+          }
+        },
+        "momo.coordinates": {
+          "type": "array",
+          "default": [],
+          "description": "Saved coordinate points with aliases",
+          "items": {
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string",
+                "description": "Coordinate alias name"
+              },
+              "x": {
+                "type": "number",
+                "description": "Relative X coordinate"
+              },
+              "y": {
+                "type": "number",
+                "description": "Relative Y coordinate"
+              }
+            }
+          }
+        },
+        "momo.ocrRegion": {
+          "type": "object",
+          "default": {
+            "x": 0,
+            "y": 0,
+            "width": 300,
+            "height": 50
+          },
+          "description": "OCR capture region (relative to target window)",
+          "properties": {
+            "x": {
+              "type": "number",
+              "description": "Region X offset"
+            },
+            "y": {
+              "type": "number",
+              "description": "Region Y offset"
+            },
+            "width": {
+              "type": "number",
+              "description": "Region width"
+            },
+            "height": {
+              "type": "number",
+              "description": "Region height"
+            }
+          }
+        },
+        "momo.ocrRefreshInterval": {
+          "type": "number",
+          "default": 5000,
+          "description": "OCR refresh interval in milliseconds"
+        },
+        "momo.ocrLanguages": {
+          "type": "array",
+          "default": [
+            "eng",
+            "chi_sim"
+          ],
+          "description": "OCR languages (eng, chi_sim, chi_tra)"
+        },
+        "momo.statusBarButtons": {
+          "type": "array",
+          "default": [],
+          "description": "Coordinate aliases to show as status bar buttons"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "tesseract.js": "^5.0.4"
+  },
+  "optionalDependencies": {
+    "robotjs": "^0.6.0"
+  }
+}
