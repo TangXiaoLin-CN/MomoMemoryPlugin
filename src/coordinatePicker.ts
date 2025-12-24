@@ -43,21 +43,46 @@ export class CoordinatePicker {
 
     this.isPickingMode = true;
 
-    // Show status bar indicator
-    this.showPickingStatus();
-
     // Show instruction
     const result = await vscode.window.showInformationMessage(
-      'Coordinate Picking Mode: Click anywhere on the target window, then press Enter to capture the coordinate. Press Escape to cancel.',
-      'Capture Now',
+      'Coordinate Picking: Click "Start Countdown" then move your mouse to the target position within 3 seconds.',
+      'Start Countdown',
       'Cancel'
     );
 
-    if (result === 'Capture Now') {
-      await this.captureCurrentPosition();
+    if (result === 'Start Countdown') {
+      await this.startCountdownCapture();
     }
 
     this.stopPicking();
+  }
+
+  /**
+   * Start countdown and capture position
+   */
+  private async startCountdownCapture(): Promise<void> {
+    // Show countdown in status bar
+    this.showPickingStatus();
+
+    for (let i = 3; i > 0; i--) {
+      if (this.statusBarItem) {
+        this.statusBarItem.text = `$(target) Capturing in ${i}... Move mouse to target!`;
+      }
+      await this.sleep(1000);
+    }
+
+    if (this.statusBarItem) {
+      this.statusBarItem.text = '$(check) Capturing...';
+    }
+
+    await this.captureCurrentPosition();
+  }
+
+  /**
+   * Sleep helper
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
