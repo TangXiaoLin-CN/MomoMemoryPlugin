@@ -1,7 +1,39 @@
+# VS Code Extension
 out/
 node_modules/
 .vscode-test/
 *.vsix
-.DS_Store
 *.log
+
+# Packaged backend binaries (too large for git)
+backend/
+
+# .NET Backend build artifacts
+MomoMemoryPlugin-backend/bin/
+MomoMemoryPlugin-backend/obj/
+MomoMemoryPlugin-backend/publish/
+MomoMemoryPlugin-backend/.vs/
+MomoMemoryPlugin-backend/*.user
+MomoMemoryPlugin-backend/*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# AI Assistant files
+.specstory/
+.claude/
+
+# Build artifacts
+*.nupkg
+
+# Temporary files
+*.tmp
+*.temp
+nul

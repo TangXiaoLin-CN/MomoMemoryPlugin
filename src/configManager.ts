@@ -163,9 +163,41 @@ export class ConfigManager {
   /**
    * Get click mode
    */
-  public getClickMode(): 'background' | 'foreground' {
+  public getClickMode(): 'foreground' | 'background_post' | 'background_send' | 'background_activate' | 'fast_foreground' | 'child_window' | 'quick_switch' | 'ahk_control' | 'ahk_post' | 'ahk_stealth' | 'fast_background' {
     const config = this.getConfig();
-    return config.get<'background' | 'foreground'>('clickMode', 'foreground');
+    return config.get<'foreground' | 'background_post' | 'background_send' | 'background_activate' | 'fast_foreground' | 'child_window' | 'quick_switch' | 'ahk_control' | 'ahk_post' | 'ahk_stealth' | 'fast_background'>('clickMode', 'foreground');
+  }
+
+  /**
+   * Get AutoHotkey path
+   */
+  public getAutoHotkeyPath(): string {
+    const config = this.getConfig();
+    return config.get<string>('autoHotkeyPath', '');
+  }
+
+  /**
+   * Check if backend is enabled
+   */
+  public useBackend(): boolean {
+    const config = this.getConfig();
+    return config.get<boolean>('useBackend', true);
+  }
+
+  /**
+   * Check if auto-start backend is enabled
+   */
+  public autoStartBackend(): boolean {
+    const config = this.getConfig();
+    return config.get<boolean>('autoStartBackend', true);
+  }
+
+  /**
+   * Get backend port
+   */
+  public getBackendPort(): number {
+    const config = this.getConfig();
+    return config.get<number>('backendPort', 5678);
   }
 
   /**
@@ -199,6 +231,8 @@ export class ConfigManager {
       ocrRefreshInterval: this.getOCRRefreshInterval(),
       ocrLanguages: this.getOCRLanguages(),
       statusBarButtons: this.getStatusBarButtons(),
+      useBackend: this.useBackend(),
+      clickMode: this.getClickMode(),
     };
   }
 

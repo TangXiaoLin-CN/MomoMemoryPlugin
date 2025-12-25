@@ -1,14 +1,35 @@
+# Development files
 .vscode/**
 .vscode-test/**
 .git/**
 .gitignore
 .specstory/**
 .claude/**
+
+# TypeScript source
 src/**
 tsconfig.json
 **/*.map
 **/*.ts
 !*.d.ts
+
+# Node modules that aren't needed at runtime
 node_modules/@types/**
 node_modules/typescript/**
 node_modules/robotjs/**
+
+# Backend source folder (we use backend/ with published binaries)
+MomoMemoryPlugin-backend/**
+
+# Build scripts
+build.bat
+build.sh
+
+# Documentation
+docs/**
+
+# Misc
+nul
+*.vsix
+
+# Keep backend/ folder with published binaries

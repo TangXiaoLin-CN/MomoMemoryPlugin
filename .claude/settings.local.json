@@ -10,7 +10,19 @@
       "Bash(npx vsce package:*)",
       "Bash(ls:*)",
       "Bash(npx @vscode/vsce package:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(dir:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet new:*)",
+      "Bash(dotnet sln add:*)",
+      "Bash(del:*)",
+      "Bash(dotnet add package:*)",
+      "Bash(dotnet remove package:*)",
+      "Bash(powershell:*)",
+      "Bash(start:*)",
+      "Bash(findstr:*)",
+      "Bash(dotnet publish:*)",
+      "Bash(copy:*)"
     ]
   }
 }

@@ -27,6 +27,8 @@ export interface CoordinatePoint {
   alias: string;
   x: number;
   y: number;
+  clickMode?: string;
+  button?: string;
 }
 
 /**
@@ -46,6 +48,8 @@ export interface OCRRegion {
   y: number;
   width: number;
   height: number;
+  enabled?: boolean;
+  language?: string;
 }
 
 /**
@@ -64,9 +68,12 @@ export interface MomoConfig {
   targetWindow: TargetWindowConfig;
   coordinates: CoordinatePoint[];
   ocrRegion: OCRRegion;
+  ocrRegion2?: OCRRegion;
   ocrRefreshInterval: number;
   ocrLanguages: string[];
   statusBarButtons: string[];
+  useBackend: boolean;
+  clickMode: string;
 }
 
 /**
