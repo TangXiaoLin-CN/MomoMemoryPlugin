@@ -39,6 +39,10 @@
       {
         "command": "momo.showBackendOutput",
         "title": "Momo: Show Backend Output"
+      },
+      {
+        "command": "momo.openBackendConfig",
+        "title": "Momo: Open Backend Config Window"
       }
     ],
     "keybindings": [

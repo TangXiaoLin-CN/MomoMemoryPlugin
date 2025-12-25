@@ -79,8 +79,15 @@ npx @vscode/vsce package
 
 ### 1. 配置后端
 
-首次使用需要在后端配置 OCR 区域和点击坐标：
+首次使用需要配置 OCR 区域和点击坐标，有两种方式：
 
+**方式一：通过 VS Code 命令**
+1. 按 `Ctrl+Shift+P` 打开命令面板
+2. 输入 `Momo: Open Backend Config Window`
+3. 在弹出的配置窗口中设置 OCR 区域和点击坐标
+4. 保存后使用 `Momo: Refresh Config` 刷新配置
+
+**方式二：直接运行后端**
 1. 直接运行 `MomoBackend.exe`（非 headless 模式）打开配置界面
 2. 配置 OCR 区域 1 和 2 的位置、大小
 3. 添加需要的点击坐标并设置别名
@@ -109,6 +116,7 @@ npx @vscode/vsce package
 |------|------|
 | `Momo: Select Target Window` | 选择目标窗口 |
 | `Momo: Capture OCR` | 手动触发 OCR 识别 |
+| `Momo: Open Backend Config Window` | 打开后端配置窗口 |
 | `Momo: Refresh Config from Backend` | 从后端重新加载配置 |
 | `Momo: Show Backend Output` | 显示后端日志 |
 | `Momo: Open Settings` | 打开插件设置 |

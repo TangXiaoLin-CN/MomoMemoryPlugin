@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { spawn } from 'child_process';
 import { WindowManager } from './windowManager';
 import { ConfigManager } from './configManager';
 import { StatusBarManager } from './statusBarManager';
@@ -136,6 +137,13 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     );
 
+    const openBackendConfigCommand = vscode.commands.registerCommand(
+      'momo.openBackendConfig',
+      async () => {
+        await openBackendConfigWindow(context.extensionPath);
+      }
+    );
+
     // Register all disposables
     context.subscriptions.push(
       selectWindowCommand,
@@ -143,7 +151,8 @@ export async function activate(context: vscode.ExtensionContext) {
       clickPointCommand,
       openSettingsCommand,
       refreshConfigCommand,
-      showBackendOutputCommand
+      showBackendOutputCommand,
+      openBackendConfigCommand
     );
 
     // Initialize status bar (async, don't block)
@@ -247,6 +256,43 @@ async function selectWindow(
     loadingMessage.dispose();
     console.error('Failed to get windows:', error);
     vscode.window.showErrorMessage(`Failed to get windows: ${error}`);
+  }
+}
+
+/**
+ * Open backend config window (launches MomoBackend.exe in GUI mode)
+ */
+async function openBackendConfigWindow(extensionPath: string): Promise<void> {
+  const backendPath = backendManager.findBackendPath(extensionPath);
+
+  if (!backendPath) {
+    vscode.window.showErrorMessage(
+      'MomoBackend.exe not found. Please build the backend first.'
+    );
+    return;
+  }
+
+  try {
+    // Launch backend without --headless to show config window
+    const configProcess = spawn(backendPath, [], {
+      cwd: require('path').dirname(backendPath),
+      detached: true,
+      stdio: 'ignore',
+    });
+
+    // Detach the process so it runs independently
+    configProcess.unref();
+
+    vscode.window.showInformationMessage(
+      'Backend config window opened. After saving, use "Momo: Refresh Config" to reload.',
+      'Refresh Config'
+    ).then((action) => {
+      if (action === 'Refresh Config') {
+        vscode.commands.executeCommand('momo.refreshConfig');
+      }
+    });
+  } catch (error) {
+    vscode.window.showErrorMessage(`Failed to open config window: ${error}`);
   }
 }
 
