@@ -8,6 +8,26 @@ namespace MomoBackend.Core;
 
 public class MouseController
 {
+    private FastBackgroundSettings _fastBgSettings = new();
+
+    /// <summary>
+    /// 日志事件 - 用于输出调试信息
+    /// </summary>
+    public event Action<string>? OnLog;
+
+    private void Log(string message)
+    {
+        OnLog?.Invoke(message);
+    }
+
+    /// <summary>
+    /// 设置 fast_background 模式的参数
+    /// </summary>
+    public void SetFastBackgroundSettings(FastBackgroundSettings settings)
+    {
+        _fastBgSettings = settings ?? new FastBackgroundSettings();
+    }
+
     /// <summary>
     /// 执行点击
     /// </summary>
@@ -80,7 +100,7 @@ public class MouseController
                     return HookCursorClick(hwnd, relativeX, relativeY, windowX, windowY, rightClick);
 
                 case "fast_background":
-                    return FastBackgroundClick(hwnd, relativeX, relativeY, rightClick);
+                    return FastBackgroundClick(hwnd, relativeX, relativeY, windowX, windowY, rightClick);
 
                 default:
                     return StealthClick(hwnd, relativeX, relativeY, windowX, windowY, rightClick);
@@ -1226,10 +1246,12 @@ public class MouseController
 
     /// <summary>
     /// 快速后台点击：无需 Hook，支持最小化窗口
-    /// 流程：恢复窗口(近透明) → 隐藏光标 → 快速点击 → 最小化 → 恢复透明度
+    /// 流程：隐藏光标 → 设置透明 → 恢复窗口 → 快速点击 → 最小化 → 恢复透明度 → 显示光标
     /// </summary>
-    private ClickResult FastBackgroundClick(IntPtr hwnd, int relativeX, int relativeY, bool rightClick)
+    private ClickResult FastBackgroundClick(IntPtr hwnd, int relativeX, int relativeY, int windowX, int windowY, bool rightClick)
     {
+        var settings = _fastBgSettings;
+
         // 保存当前状态
         IntPtr prevForeground = GetForegroundWindow();
         GetCursorPos(out POINT originalPos);
@@ -1240,12 +1262,60 @@ public class MouseController
         int originalExStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
         bool wasLayered = (originalExStyle & WS_EX_LAYERED) != 0;
 
-        // 使用很低的透明度（1-5），而不是0，这样窗口仍然可以接收点击
-        const byte NEAR_INVISIBLE_ALPHA = 3;
+        // 使用配置的透明度
+        byte windowAlpha = settings.WindowAlpha;
+
+        // 保存原始光标（用于系统级隐藏）
+        IntPtr originalCursor = IntPtr.Zero;
+        IntPtr blankCursor = IntPtr.Zero;
+        bool cursorReplaced = false;
 
         try
         {
-            // 1. 恢复窗口（如果最小化或隐藏）- 先恢复再设透明
+            // 1. 【最先】隐藏光标（使用系统级替换）
+            if (settings.HideCursor)
+            {
+                try
+                {
+                    // 创建一个 32x32 的透明光标
+                    byte[] andMask = new byte[128];
+                    byte[] xorMask = new byte[128];
+                    for (int i = 0; i < 128; i++)
+                    {
+                        andMask[i] = 0xFF;  // 全透明
+                        xorMask[i] = 0x00;  // 不绘制
+                    }
+                    blankCursor = CreateCursor(IntPtr.Zero, 0, 0, 32, 32, andMask, xorMask);
+
+                    if (blankCursor != IntPtr.Zero)
+                    {
+                        // 替换多种系统光标为透明光标
+                        uint[] cursorTypes = { OCR_NORMAL, OCR_IBEAM, OCR_HAND, OCR_APPSTARTING };
+
+                        foreach (var cursorType in cursorTypes)
+                        {
+                            IntPtr cursorCopy = CopyIcon(blankCursor);
+                            if (cursorCopy != IntPtr.Zero && SetSystemCursor(cursorCopy, cursorType))
+                            {
+                                cursorReplaced = true;
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // 光标隐藏失败不影响点击功能
+                }
+            }
+
+            // 2. 设置窗口为分层窗口并设置透明度（在恢复窗口之前）
+            if (!wasLayered)
+            {
+                SetWindowLong(hwnd, GWL_EXSTYLE, originalExStyle | WS_EX_LAYERED);
+            }
+            SetLayeredWindowAttributes(hwnd, 0, windowAlpha, LWA_ALPHA);
+
+            // 3. 恢复窗口（如果最小化或隐藏）- 此时窗口已经透明
             if (wasHidden)
             {
                 ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -1255,67 +1325,71 @@ public class MouseController
                 ShowWindow(hwnd, SW_RESTORE);
             }
 
-            // 2. 窗口恢复后立即设置近乎透明
-            if (!wasLayered)
+            Thread.Sleep(settings.DelayAfterRestore);  // 等待窗口恢复
+
+            // 4. 【重要】恢复窗口后重新获取客户区原点，因为最小化时的坐标是无效的
+            int actualWindowX = windowX;
+            int actualWindowY = windowY;
+            if (wasMinimized || wasHidden)
             {
-                SetWindowLong(hwnd, GWL_EXSTYLE, originalExStyle | WS_EX_LAYERED);
-            }
-            SetLayeredWindowAttributes(hwnd, 0, NEAR_INVISIBLE_ALPHA, LWA_ALPHA);
-
-            Thread.Sleep(20);  // 等待窗口恢复
-
-            // 3. 获取窗口位置并计算绝对坐标
-            if (!GetWindowRect(hwnd, out RECT rect))
-            {
-                return new ClickResult { Success = false, Message = "无法获取窗口位置" };
+                var clientOrigin = new POINT { X = 0, Y = 0 };
+                if (ClientToScreen(hwnd, ref clientOrigin))
+                {
+                    actualWindowX = clientOrigin.X;
+                    actualWindowY = clientOrigin.Y;
+                }
             }
 
-            int absoluteX = rect.Left + relativeX;
-            int absoluteY = rect.Top + relativeY;
+            // 5. 计算绝对坐标
+            int absoluteX = actualWindowX + relativeX;
+            int absoluteY = actualWindowY + relativeY;
 
-            // 4. 隐藏光标
-            ShowCursor(false);
-
-            // 5. 激活窗口并点击
+            // 6. 激活窗口并点击
             AttachAndActivate(hwnd);
+            Thread.Sleep(settings.DelayBeforeClick);  // 等待窗口激活
+
             SetCursorPos(absoluteX, absoluteY);
+            Thread.Sleep(settings.DelayAfterMove);
 
             if (rightClick)
             {
                 mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, IntPtr.Zero);
+                Thread.Sleep(10);
                 mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, IntPtr.Zero);
             }
             else
             {
                 mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
+                Thread.Sleep(10);
                 mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
             }
 
-            // 6. 立即恢复鼠标位置
+            Thread.Sleep(settings.DelayAfterClick);  // 给点击一点时间被处理
+
+            // 7. 立即恢复鼠标位置
             SetCursorPos(originalPos.X, originalPos.Y);
 
-            // 7. 显示光标
-            ShowCursor(true);
-
             // 8. 恢复前台窗口
+            Thread.Sleep(settings.DelayBeforeRestore);
             if (prevForeground != IntPtr.Zero && prevForeground != hwnd)
             {
                 SetForegroundWindow(prevForeground);
             }
 
-            // 9. 最小化目标窗口
-            Thread.Sleep(10);
-            ShowWindow(hwnd, SW_MINIMIZE);
+            // 9. 最小化目标窗口（可选）
+            if (settings.MinimizeAfterClick)
+            {
+                ShowWindow(hwnd, SW_MINIMIZE);
+            }
 
             return new ClickResult
             {
                 Success = true,
-                Message = $"快速后台点击完成 ({relativeX},{relativeY})"
+                Message = $"快速后台点击完成 ({relativeX},{relativeY}) -> ({absoluteX},{absoluteY})"
             };
         }
         catch (Exception ex)
         {
-            ShowCursor(true);
             SetCursorPos(originalPos.X, originalPos.Y);
             if (prevForeground != IntPtr.Zero && prevForeground != hwnd)
             {
@@ -1325,11 +1399,34 @@ public class MouseController
         }
         finally
         {
-            // 10. 恢复窗口透明度
+            // 【最后】恢复窗口透明度
             SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
             if (!wasLayered)
             {
                 SetWindowLong(hwnd, GWL_EXSTYLE, originalExStyle);
+            }
+
+            // 【最后】恢复系统光标
+            if (settings.HideCursor && cursorReplaced)
+            {
+                try
+                {
+                    SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+                }
+                catch
+                {
+                    // 恢复失败不影响程序运行
+                }
+            }
+
+            // 清理创建的光标
+            if (blankCursor != IntPtr.Zero)
+            {
+                DestroyCursor(blankCursor);
+            }
+            if (originalCursor != IntPtr.Zero)
+            {
+                DestroyCursor(originalCursor);
             }
         }
     }

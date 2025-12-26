@@ -132,15 +132,16 @@ public class TestForm : Form
             Size = new Size(665, 160)
         };
 
-        // OCR 区域1
+        // OCR 区域1（列表中第一个）
+        var region1 = _config.OcrRegions.Count > 0 ? _config.OcrRegions[0] : null;
         var ocr1Label = new Label
         {
-            Text = _config.OcrRegion1.Enabled
-                ? $"区域1: ({_config.OcrRegion1.X},{_config.OcrRegion1.Y}) {_config.OcrRegion1.Width}x{_config.OcrRegion1.Height}"
-                : "区域1: (未启用)",
+            Text = region1 != null && region1.Enabled
+                ? $"{region1.Alias}: ({region1.X},{region1.Y}) {region1.Width}x{region1.Height}"
+                : "区域1: (未配置)",
             Location = new Point(10, 25),
             Width = 250,
-            ForeColor = _config.OcrRegion1.Enabled ? Color.Black : Color.Gray
+            ForeColor = region1?.Enabled == true ? Color.Black : Color.Gray
         };
 
         _ocr1Result = new TextBox
@@ -158,19 +159,20 @@ public class TestForm : Form
             Text = "识别区域1",
             Location = new Point(10, 100),
             Width = 100,
-            Enabled = _config.OcrRegion1.Enabled
+            Enabled = region1?.Enabled == true
         };
-        _testOcr1Btn.Click += async (s, e) => await TestOcrAsync(1);
+        _testOcr1Btn.Click += async (s, e) => await TestOcrAsync(0);
 
-        // OCR 区域2
+        // OCR 区域2（列表中第二个）
+        var region2 = _config.OcrRegions.Count > 1 ? _config.OcrRegions[1] : null;
         var ocr2Label = new Label
         {
-            Text = _config.OcrRegion2.Enabled
-                ? $"区域2: ({_config.OcrRegion2.X},{_config.OcrRegion2.Y}) {_config.OcrRegion2.Width}x{_config.OcrRegion2.Height}"
-                : "区域2: (未启用)",
+            Text = region2 != null && region2.Enabled
+                ? $"{region2.Alias}: ({region2.X},{region2.Y}) {region2.Width}x{region2.Height}"
+                : "区域2: (未配置)",
             Location = new Point(340, 25),
             Width = 250,
-            ForeColor = _config.OcrRegion2.Enabled ? Color.Black : Color.Gray
+            ForeColor = region2?.Enabled == true ? Color.Black : Color.Gray
         };
 
         _ocr2Result = new TextBox
@@ -188,9 +190,9 @@ public class TestForm : Form
             Text = "识别区域2",
             Location = new Point(340, 100),
             Width = 100,
-            Enabled = _config.OcrRegion2.Enabled
+            Enabled = region2?.Enabled == true
         };
-        _testOcr2Btn.Click += async (s, e) => await TestOcrAsync(2);
+        _testOcr2Btn.Click += async (s, e) => await TestOcrAsync(1);
 
         _testAllOcrBtn = new Button
         {
@@ -201,8 +203,11 @@ public class TestForm : Form
         };
         _testAllOcrBtn.Click += async (s, e) =>
         {
-            if (_config.OcrRegion1.Enabled) await TestOcrAsync(1);
-            if (_config.OcrRegion2.Enabled) await TestOcrAsync(2);
+            for (int i = 0; i < _config.OcrRegions.Count; i++)
+            {
+                if (_config.OcrRegions[i].Enabled)
+                    await TestOcrAsync(i);
+            }
         };
 
         _autoRefreshCheck = new CheckBox
@@ -355,7 +360,7 @@ public class TestForm : Form
         }
     }
 
-    private async Task TestOcrAsync(int regionNum)
+    private async Task TestOcrAsync(int regionIndex)
     {
         if (_selectedWindow == null)
         {
@@ -363,25 +368,31 @@ public class TestForm : Form
             return;
         }
 
-        var region = regionNum == 1 ? _config.OcrRegion1 : _config.OcrRegion2;
-        var resultBox = regionNum == 1 ? _ocr1Result : _ocr2Result;
+        if (regionIndex < 0 || regionIndex >= _config.OcrRegions.Count)
+        {
+            Log($"错误: OCR 区域索引 {regionIndex} 超出范围");
+            return;
+        }
+
+        var region = _config.OcrRegions[regionIndex];
+        var resultBox = regionIndex == 0 ? _ocr1Result : (regionIndex == 1 ? _ocr2Result : null);
 
         if (!region.Enabled)
         {
-            Log($"区域{regionNum}: 未启用");
+            Log($"{region.Alias}: 未启用");
             return;
         }
 
         var engineName = _config.OcrEngine == "paddle" ? "PaddleOCR" : "Windows OCR";
-        Log($"识别区域{regionNum}: ({region.X},{region.Y}) {region.Width}x{region.Height} [{engineName}]");
+        Log($"识别 {region.Alias}: ({region.X},{region.Y}) {region.Width}x{region.Height} [{engineName}]");
 
         var rect = new Rectangle(region.X, region.Y, region.Width, region.Height);
         var bitmap = _screenshotService.CaptureRegion((IntPtr)_selectedWindow.Hwnd, rect);
 
         if (bitmap == null)
         {
-            Log($"区域{regionNum}: 截图失败");
-            resultBox.Text = "[截图失败]";
+            Log($"{region.Alias}: 截图失败");
+            if (resultBox != null) resultBox.Text = "[截图失败]";
             return;
         }
 
@@ -408,13 +419,13 @@ public class TestForm : Form
 
             if (result.Success)
             {
-                resultBox.Text = result.Text;
-                Log($"区域{regionNum}: {(string.IsNullOrEmpty(result.Text) ? "[无文字]" : result.Text)}");
+                if (resultBox != null) resultBox.Text = result.Text;
+                Log($"{region.Alias}: {(string.IsNullOrEmpty(result.Text) ? "[无文字]" : result.Text)}");
             }
             else
             {
-                resultBox.Text = $"[识别失败: {result.ErrorMessage}]";
-                Log($"区域{regionNum}: 识别失败 - {result.ErrorMessage}");
+                if (resultBox != null) resultBox.Text = $"[识别失败: {result.ErrorMessage}]";
+                Log($"{region.Alias}: 识别失败 - {result.ErrorMessage}");
             }
         }
         finally
@@ -446,10 +457,11 @@ public class TestForm : Form
         {
             if (_selectedWindow != null)
             {
-                if (_config.OcrRegion1.Enabled)
-                    await TestOcrAsync(1);
-                if (_config.OcrRegion2.Enabled)
-                    await TestOcrAsync(2);
+                for (int i = 0; i < _config.OcrRegions.Count; i++)
+                {
+                    if (_config.OcrRegions[i].Enabled)
+                        await TestOcrAsync(i);
+                }
             }
         };
         _ocrTimer.Start();

@@ -56,7 +56,7 @@ export interface BackendWindowRect {
  * Backend OCR Region config
  */
 export interface BackendOcrRegion {
-  name: string;
+  alias: string;
   x: number;
   y: number;
   width: number;
@@ -84,8 +84,7 @@ export interface BackendConfig {
   targetWindowTitle: string;
   targetProcessName: string;
   clickPoints: BackendClickPoint[];
-  ocrRegion1: BackendOcrRegion;
-  ocrRegion2: BackendOcrRegion;
+  ocrRegions: BackendOcrRegion[];
   ocrRefreshInterval: number;
   ocrAutoRefresh: boolean;
   ocrEngine: string;

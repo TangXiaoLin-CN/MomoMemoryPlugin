@@ -78,25 +78,36 @@ export async function activate(context: vscode.ExtensionContext) {
       'momo.captureOCR',
       async () => {
         const result = await statusBarManager.performOCR();
-        if (result) {
-          // Show both OCR results
-          const text = [
-            result.ocr1 ? `OCR1: ${result.ocr1}` : null,
-            result.ocr2 ? `OCR2: ${result.ocr2}` : null,
-          ].filter(Boolean).join('\n');
+        if (result && result.size > 0) {
+          // Build display text from all OCR results
+          const textParts: string[] = [];
+          const aliases: string[] = [];
+          result.forEach((text, alias) => {
+            if (text) {
+              textParts.push(`${alias}: ${text}`);
+              aliases.push(alias);
+            }
+          });
 
-          if (text) {
+          if (textParts.length > 0) {
+            const displayText = textParts.join('\n');
+            const buttons = aliases.slice(0, 3).map(a => `Copy ${a}`); // Show up to 3 copy buttons
+
             const action = await vscode.window.showInformationMessage(
-              text.length > 100 ? text.substring(0, 100) + '...' : text,
-              'Copy OCR1',
-              'Copy OCR2'
+              displayText.length > 100 ? displayText.substring(0, 100) + '...' : displayText,
+              ...buttons
             );
-            if (action === 'Copy OCR1' && result.ocr1) {
-              await vscode.env.clipboard.writeText(result.ocr1);
-              vscode.window.showInformationMessage('OCR1 result copied');
-            } else if (action === 'Copy OCR2' && result.ocr2) {
-              await vscode.env.clipboard.writeText(result.ocr2);
-              vscode.window.showInformationMessage('OCR2 result copied');
+
+            if (action) {
+              const aliasMatch = action.match(/^Copy (.+)$/);
+              if (aliasMatch) {
+                const alias = aliasMatch[1];
+                const text = result.get(alias);
+                if (text) {
+                  await vscode.env.clipboard.writeText(text);
+                  vscode.window.showInformationMessage(`${alias} result copied`);
+                }
+              }
             }
           }
         }

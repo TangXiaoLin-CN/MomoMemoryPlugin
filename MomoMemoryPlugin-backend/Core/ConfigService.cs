@@ -136,19 +136,47 @@ public class ConfigService
     }
 
     /// <summary>
-    /// 更新 OCR 区域1
+    /// 添加 OCR 区域
     /// </summary>
-    public void UpdateOcrRegion1(OcrRegion region)
+    public void AddOcrRegion(OcrRegion region)
     {
-        _config.OcrRegion1 = region;
+        _config.OcrRegions.Add(region);
     }
 
     /// <summary>
-    /// 更新 OCR 区域2
+    /// 移除 OCR 区域
     /// </summary>
-    public void UpdateOcrRegion2(OcrRegion region)
+    public bool RemoveOcrRegion(string alias)
     {
-        _config.OcrRegion2 = region;
+        var region = _config.OcrRegions.FirstOrDefault(r => r.Alias == alias);
+        if (region != null)
+        {
+            _config.OcrRegions.Remove(region);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 更新 OCR 区域
+    /// </summary>
+    public bool UpdateOcrRegion(string alias, OcrRegion newRegion)
+    {
+        var index = _config.OcrRegions.FindIndex(r => r.Alias == alias);
+        if (index >= 0)
+        {
+            _config.OcrRegions[index] = newRegion;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 获取 OCR 区域
+    /// </summary>
+    public OcrRegion? GetOcrRegion(string alias)
+    {
+        return _config.OcrRegions.FirstOrDefault(r => r.Alias == alias);
     }
 
     /// <summary>

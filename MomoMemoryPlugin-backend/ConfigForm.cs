@@ -27,28 +27,28 @@ public class ConfigForm : Form
     private Button _capturePointBtn = null!;
     private Button _previewPointsBtn = null!;
 
-    // OCR 区域1
-    private NumericUpDown _ocr1X = null!;
-    private NumericUpDown _ocr1Y = null!;
-    private NumericUpDown _ocr1Width = null!;
-    private NumericUpDown _ocr1Height = null!;
-    private ComboBox _ocr1Lang = null!;
-    private CheckBox _ocr1Enabled = null!;
-    private Button _ocr1SelectBtn = null!;
-
-    // OCR 区域2
-    private NumericUpDown _ocr2X = null!;
-    private NumericUpDown _ocr2Y = null!;
-    private NumericUpDown _ocr2Width = null!;
-    private NumericUpDown _ocr2Height = null!;
-    private ComboBox _ocr2Lang = null!;
-    private CheckBox _ocr2Enabled = null!;
-    private Button _ocr2SelectBtn = null!;
+    // OCR 区域列表
+    private ListView _ocrRegionsListView = null!;
+    private Button _addOcrRegionBtn = null!;
+    private Button _editOcrRegionBtn = null!;
+    private Button _deleteOcrRegionBtn = null!;
+    private Button _captureOcrRegionBtn = null!;
+    private Button _previewOcrRegionsBtn = null!;
 
     // OCR 自动刷新设置
     private NumericUpDown _ocrRefreshInterval = null!;
     private CheckBox _ocrAutoRefresh = null!;
     private ComboBox _ocrEngineCombo = null!;
+
+    // fast_background 点击参数
+    private NumericUpDown _fbAlpha = null!;
+    private NumericUpDown _fbDelayAfterRestore = null!;
+    private NumericUpDown _fbDelayBeforeClick = null!;
+    private NumericUpDown _fbDelayAfterMove = null!;
+    private NumericUpDown _fbDelayAfterClick = null!;
+    private NumericUpDown _fbDelayBeforeRestore = null!;
+    private CheckBox _fbMinimizeAfterClick = null!;
+    private CheckBox _fbHideCursor = null!;
 
     // 操作按钮
     private Button _saveBtn = null!;
@@ -73,7 +73,7 @@ public class ConfigForm : Form
     private void InitializeComponent()
     {
         this.Text = "配置管理";
-        this.Size = new Size(750, 700);
+        this.Size = new Size(750, 920);
         this.StartPosition = FormStartPosition.CenterScreen;
         this.FormBorderStyle = FormBorderStyle.FixedSingle;
         this.MaximizeBox = false;
@@ -172,79 +172,166 @@ public class ConfigForm : Form
         {
             Text = "OCR 识别区域配置",
             Location = new Point(10, y),
-            Size = new Size(715, 140)
+            Size = new Size(715, 200)
         };
 
-        // OCR 区域1
-        var ocr1Label = new Label { Text = "区域1:", Location = new Point(10, 25), Width = 50 };
-        _ocr1Enabled = new CheckBox { Text = "启用", Location = new Point(60, 23), Checked = true, Width = 55 };
+        // OCR 区域列表
+        _ocrRegionsListView = new ListView
+        {
+            Location = new Point(10, 20),
+            Size = new Size(580, 100),
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true
+        };
+        _ocrRegionsListView.Columns.Add("别名", 100);
+        _ocrRegionsListView.Columns.Add("X", 50);
+        _ocrRegionsListView.Columns.Add("Y", 50);
+        _ocrRegionsListView.Columns.Add("宽", 50);
+        _ocrRegionsListView.Columns.Add("高", 50);
+        _ocrRegionsListView.Columns.Add("语言", 60);
+        _ocrRegionsListView.Columns.Add("启用", 50);
 
-        var ocr1XLabel = new Label { Text = "X:", Location = new Point(120, 25), Width = 20 };
-        _ocr1X = new NumericUpDown { Location = new Point(140, 22), Width = 60, Minimum = 0, Maximum = 5000 };
+        _addOcrRegionBtn = new Button { Text = "添加", Location = new Point(600, 20), Width = 100 };
+        _addOcrRegionBtn.Click += AddOcrRegion_Click;
 
-        var ocr1YLabel = new Label { Text = "Y:", Location = new Point(210, 25), Width = 20 };
-        _ocr1Y = new NumericUpDown { Location = new Point(230, 22), Width = 60, Minimum = 0, Maximum = 5000 };
+        _editOcrRegionBtn = new Button { Text = "编辑", Location = new Point(600, 55), Width = 100 };
+        _editOcrRegionBtn.Click += EditOcrRegion_Click;
 
-        var ocr1WLabel = new Label { Text = "宽:", Location = new Point(300, 25), Width = 25 };
-        _ocr1Width = new NumericUpDown { Location = new Point(325, 22), Width = 60, Minimum = 10, Maximum = 2000, Value = 200 };
+        _deleteOcrRegionBtn = new Button { Text = "删除", Location = new Point(600, 90), Width = 100 };
+        _deleteOcrRegionBtn.Click += DeleteOcrRegion_Click;
 
-        var ocr1HLabel = new Label { Text = "高:", Location = new Point(395, 25), Width = 25 };
-        _ocr1Height = new NumericUpDown { Location = new Point(420, 22), Width = 60, Minimum = 10, Maximum = 2000, Value = 50 };
+        _captureOcrRegionBtn = new Button { Text = "框选捕获", Location = new Point(10, 125), Width = 100, BackColor = Color.LightYellow };
+        _captureOcrRegionBtn.Click += CaptureOcrRegion_Click;
 
-        var ocr1LangLabel = new Label { Text = "语言:", Location = new Point(490, 25), Width = 35 };
-        _ocr1Lang = new ComboBox { Location = new Point(525, 22), Width = 70, DropDownStyle = ComboBoxStyle.DropDownList };
-        _ocr1Lang.Items.AddRange(new object[] { "自动", "中文", "英文" });
-        _ocr1Lang.SelectedIndex = 0;
-
-        _ocr1SelectBtn = new Button { Text = "框选", Location = new Point(605, 20), Width = 50, BackColor = Color.LightYellow };
-        _ocr1SelectBtn.Click += Ocr1Select_Click;
-
-        // OCR 区域2
-        var ocr2Label = new Label { Text = "区域2:", Location = new Point(10, 60), Width = 50 };
-        _ocr2Enabled = new CheckBox { Text = "启用", Location = new Point(60, 58), Checked = false, Width = 55 };
-
-        var ocr2XLabel = new Label { Text = "X:", Location = new Point(120, 60), Width = 20 };
-        _ocr2X = new NumericUpDown { Location = new Point(140, 57), Width = 60, Minimum = 0, Maximum = 5000 };
-
-        var ocr2YLabel = new Label { Text = "Y:", Location = new Point(210, 60), Width = 20 };
-        _ocr2Y = new NumericUpDown { Location = new Point(230, 57), Width = 60, Minimum = 0, Maximum = 5000, Value = 50 };
-
-        var ocr2WLabel = new Label { Text = "宽:", Location = new Point(300, 60), Width = 25 };
-        _ocr2Width = new NumericUpDown { Location = new Point(325, 57), Width = 60, Minimum = 10, Maximum = 2000, Value = 200 };
-
-        var ocr2HLabel = new Label { Text = "高:", Location = new Point(395, 60), Width = 25 };
-        _ocr2Height = new NumericUpDown { Location = new Point(420, 57), Width = 60, Minimum = 10, Maximum = 2000, Value = 50 };
-
-        var ocr2LangLabel = new Label { Text = "语言:", Location = new Point(490, 60), Width = 35 };
-        _ocr2Lang = new ComboBox { Location = new Point(525, 57), Width = 70, DropDownStyle = ComboBoxStyle.DropDownList };
-        _ocr2Lang.Items.AddRange(new object[] { "自动", "中文", "英文" });
-        _ocr2Lang.SelectedIndex = 0;
-
-        _ocr2SelectBtn = new Button { Text = "框选", Location = new Point(605, 55), Width = 50, BackColor = Color.LightYellow };
-        _ocr2SelectBtn.Click += Ocr2Select_Click;
+        _previewOcrRegionsBtn = new Button { Text = "预览区域", Location = new Point(120, 125), Width = 100, BackColor = Color.LightCyan };
+        _previewOcrRegionsBtn.Click += PreviewOcrRegions_Click;
 
         // OCR 刷新设置
-        var refreshLabel = new Label { Text = "间隔(秒):", Location = new Point(10, 100), Width = 60 };
-        _ocrRefreshInterval = new NumericUpDown { Location = new Point(70, 97), Width = 50, Minimum = 1, Maximum = 60, Value = 3 };
-        _ocrAutoRefresh = new CheckBox { Text = "自动刷新", Location = new Point(130, 98), Width = 80 };
+        var refreshLabel = new Label { Text = "间隔(秒):", Location = new Point(240, 128), Width = 60 };
+        _ocrRefreshInterval = new NumericUpDown { Location = new Point(300, 125), Width = 50, Minimum = 1, Maximum = 60, Value = 3 };
+        _ocrAutoRefresh = new CheckBox { Text = "自动刷新", Location = new Point(360, 127), Width = 80 };
 
-        var engineLabel = new Label { Text = "OCR引擎:", Location = new Point(220, 100), Width = 60 };
-        _ocrEngineCombo = new ComboBox { Location = new Point(280, 97), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
+        var engineLabel = new Label { Text = "OCR引擎:", Location = new Point(450, 128), Width = 60 };
+        _ocrEngineCombo = new ComboBox { Location = new Point(510, 125), Width = 150, DropDownStyle = ComboBoxStyle.DropDownList };
         _ocrEngineCombo.Items.AddRange(new object[] { "PaddleOCR (推荐)", "Windows OCR" });
         _ocrEngineCombo.SelectedIndex = 0;
 
-        var previewOcrBtn = new Button { Text = "预览OCR区域", Location = new Point(450, 95), Width = 100, BackColor = Color.LightCyan };
-        previewOcrBtn.Click += PreviewOcrRegions_Click;
+        var ocrTipLabel = new Label
+        {
+            Text = "提示: OCR 区域在状态栏显示时使用别名标识",
+            Location = new Point(10, 160),
+            Width = 580,
+            ForeColor = Color.Gray
+        };
 
         ocrGroup.Controls.AddRange(new Control[] {
-            ocr1Label, _ocr1Enabled, ocr1XLabel, _ocr1X, ocr1YLabel, _ocr1Y,
-            ocr1WLabel, _ocr1Width, ocr1HLabel, _ocr1Height, ocr1LangLabel, _ocr1Lang, _ocr1SelectBtn,
-            ocr2Label, _ocr2Enabled, ocr2XLabel, _ocr2X, ocr2YLabel, _ocr2Y,
-            ocr2WLabel, _ocr2Width, ocr2HLabel, _ocr2Height, ocr2LangLabel, _ocr2Lang, _ocr2SelectBtn,
-            refreshLabel, _ocrRefreshInterval, _ocrAutoRefresh, engineLabel, _ocrEngineCombo, previewOcrBtn
+            _ocrRegionsListView, _addOcrRegionBtn, _editOcrRegionBtn, _deleteOcrRegionBtn,
+            _captureOcrRegionBtn, _previewOcrRegionsBtn,
+            refreshLabel, _ocrRefreshInterval, _ocrAutoRefresh, engineLabel, _ocrEngineCombo, ocrTipLabel
         });
         this.Controls.Add(ocrGroup);
-        y += 150;
+        y += 210;
+
+        // ========== 后台点击参数配置 ==========
+        var fastBgGroup = new GroupBox
+        {
+            Text = "后台点击参数 (fast_background)",
+            Location = new Point(10, y),
+            Size = new Size(715, 200)
+        };
+
+        // 创建 ToolTip 组件
+        var toolTip = new ToolTip
+        {
+            AutoPopDelay = 10000,  // 显示10秒
+            InitialDelay = 300,
+            ReshowDelay = 100,
+            ShowAlways = true
+        };
+
+        int fbY = 20;
+        int fbLabelWidth = 100;
+        int fbNumWidth = 60;
+
+        // 第一行：透明度、恢复后延迟、激活后延迟、移动后延迟
+        var alphaLabel = new Label { Text = "窗口透明度:", Location = new Point(10, fbY + 3), Width = fbLabelWidth };
+        _fbAlpha = new NumericUpDown { Location = new Point(110, fbY), Width = fbNumWidth, Minimum = 0, Maximum = 255, Value = 3 };
+        toolTip.SetToolTip(_fbAlpha, "点击时目标窗口的透明度\n0 = 完全透明（不可见）\n255 = 完全不透明\n建议值: 1-10（近乎不可见但可点击）");
+        toolTip.SetToolTip(alphaLabel, "点击时目标窗口的透明度 (0-255)");
+
+        var restoreLabel = new Label { Text = "恢复后(ms):", Location = new Point(180, fbY + 3), Width = fbLabelWidth };
+        _fbDelayAfterRestore = new NumericUpDown { Location = new Point(280, fbY), Width = fbNumWidth, Minimum = 0, Maximum = 1000, Value = 30 };
+        toolTip.SetToolTip(_fbDelayAfterRestore, "窗口从最小化恢复后的等待时间\n等待窗口完全显示后再继续\n如果窗口恢复慢可增加此值");
+        toolTip.SetToolTip(restoreLabel, "窗口恢复后等待时间 (毫秒)");
+
+        var beforeClickLabel = new Label { Text = "激活后(ms):", Location = new Point(350, fbY + 3), Width = fbLabelWidth };
+        _fbDelayBeforeClick = new NumericUpDown { Location = new Point(450, fbY), Width = fbNumWidth, Minimum = 0, Maximum = 1000, Value = 20 };
+        toolTip.SetToolTip(_fbDelayBeforeClick, "窗口激活（获得焦点）后的等待时间\n等待窗口准备好接收输入\n如果点击经常失败可增加此值");
+        toolTip.SetToolTip(beforeClickLabel, "窗口激活后、点击前等待时间 (毫秒)");
+
+        var afterMoveLabel = new Label { Text = "移动后(ms):", Location = new Point(520, fbY + 3), Width = fbLabelWidth };
+        _fbDelayAfterMove = new NumericUpDown { Location = new Point(620, fbY), Width = fbNumWidth, Minimum = 0, Maximum = 1000, Value = 10 };
+        toolTip.SetToolTip(_fbDelayAfterMove, "鼠标移动到目标位置后的等待时间\n等待系统处理鼠标移动事件\n一般 5-20ms 即可");
+        toolTip.SetToolTip(afterMoveLabel, "鼠标移动后、点击前等待时间 (毫秒)");
+
+        fbY += 30;
+
+        // 第二行：点击后延迟、切换前延迟
+        var afterClickLabel = new Label { Text = "点击后(ms):", Location = new Point(10, fbY + 3), Width = fbLabelWidth };
+        _fbDelayAfterClick = new NumericUpDown { Location = new Point(110, fbY), Width = fbNumWidth, Minimum = 0, Maximum = 1000, Value = 30 };
+        toolTip.SetToolTip(_fbDelayAfterClick, "点击完成后的等待时间\n等待目标应用响应点击事件\n如果应用响应慢可增加此值");
+        toolTip.SetToolTip(afterClickLabel, "点击后等待应用响应的时间 (毫秒)");
+
+        var beforeRestoreLabel = new Label { Text = "切换前(ms):", Location = new Point(180, fbY + 3), Width = fbLabelWidth };
+        _fbDelayBeforeRestore = new NumericUpDown { Location = new Point(280, fbY), Width = fbNumWidth, Minimum = 0, Maximum = 1000, Value = 20 };
+        toolTip.SetToolTip(_fbDelayBeforeRestore, "切换回原来前台窗口前的等待时间\n确保点击已被处理后再切换\n一般 10-30ms 即可");
+        toolTip.SetToolTip(beforeRestoreLabel, "切换回原窗口前的等待时间 (毫秒)");
+
+        // 第二行：复选框
+        _fbMinimizeAfterClick = new CheckBox { Text = "点击后最小化窗口", Location = new Point(360, fbY), Width = 140, Checked = true };
+        toolTip.SetToolTip(_fbMinimizeAfterClick, "点击完成后是否将目标窗口最小化\n勾选: 点击后自动最小化目标窗口\n不勾选: 目标窗口保持原状态");
+
+        _fbHideCursor = new CheckBox { Text = "隐藏鼠标光标", Location = new Point(510, fbY), Width = 120, Checked = true };
+        toolTip.SetToolTip(_fbHideCursor, "点击时是否隐藏鼠标光标\n勾选: 点击过程中光标不可见\n不勾选: 可以看到光标移动");
+
+        fbY += 35;
+
+        // 第三行：详细说明
+        var fbHelpLabel1 = new Label
+        {
+            Text = "【点击流程】恢复窗口 → 设置透明 → 等待(恢复后) → 激活窗口 → 等待(激活后) → 移动鼠标 → 等待(移动后) → 点击 → 等待(点击后) → 恢复鼠标 → 等待(切换前) → 切换窗口",
+            Location = new Point(10, fbY),
+            Width = 690,
+            ForeColor = Color.DarkBlue
+        };
+
+        fbY += 20;
+        var fbHelpLabel2 = new Label
+        {
+            Text = "【调试建议】如果点击不稳定: 1) 先增加\"激活后\"延迟到 50-100ms  2) 再增加\"点击后\"延迟  3) 透明度建议 1-10",
+            Location = new Point(10, fbY),
+            Width = 690,
+            ForeColor = Color.Gray
+        };
+
+        fbY += 20;
+        var fbHelpLabel3 = new Label
+        {
+            Text = "【注意】总延迟 = 恢复后 + 激活后 + 移动后 + 点击后 + 切换前，延迟越长点击越稳定但速度越慢",
+            Location = new Point(10, fbY),
+            Width = 690,
+            ForeColor = Color.Gray
+        };
+
+        fastBgGroup.Controls.AddRange(new Control[] {
+            alphaLabel, _fbAlpha, restoreLabel, _fbDelayAfterRestore,
+            beforeClickLabel, _fbDelayBeforeClick, afterMoveLabel, _fbDelayAfterMove,
+            afterClickLabel, _fbDelayAfterClick, beforeRestoreLabel, _fbDelayBeforeRestore,
+            _fbMinimizeAfterClick, _fbHideCursor, fbHelpLabel1, fbHelpLabel2, fbHelpLabel3
+        });
+        this.Controls.Add(fastBgGroup);
+        y += 210;
 
         // ========== 操作按钮 ==========
         _saveBtn = new Button
@@ -347,31 +434,8 @@ public class ConfigForm : Form
         // 加载点击区域
         RefreshClickPointsList();
 
-        // 加载 OCR 区域1
-        _ocr1X.Value = config.OcrRegion1.X;
-        _ocr1Y.Value = config.OcrRegion1.Y;
-        _ocr1Width.Value = Math.Max(10, config.OcrRegion1.Width);
-        _ocr1Height.Value = Math.Max(10, config.OcrRegion1.Height);
-        _ocr1Enabled.Checked = config.OcrRegion1.Enabled;
-        _ocr1Lang.SelectedIndex = config.OcrRegion1.Language switch
-        {
-            "zh" => 1,
-            "en" => 2,
-            _ => 0
-        };
-
-        // 加载 OCR 区域2
-        _ocr2X.Value = config.OcrRegion2.X;
-        _ocr2Y.Value = config.OcrRegion2.Y;
-        _ocr2Width.Value = Math.Max(10, config.OcrRegion2.Width);
-        _ocr2Height.Value = Math.Max(10, config.OcrRegion2.Height);
-        _ocr2Enabled.Checked = config.OcrRegion2.Enabled;
-        _ocr2Lang.SelectedIndex = config.OcrRegion2.Language switch
-        {
-            "zh" => 1,
-            "en" => 2,
-            _ => 0
-        };
+        // 加载 OCR 区域列表
+        RefreshOcrRegionsList();
 
         // 加载 OCR 自动刷新设置
         _ocrRefreshInterval.Value = Math.Max(1, Math.Min(60, config.OcrRefreshInterval / 1000));
@@ -379,6 +443,33 @@ public class ConfigForm : Form
 
         // 加载 OCR 引擎选择
         _ocrEngineCombo.SelectedIndex = config.OcrEngine == "windows" ? 1 : 0;
+
+        // 加载 fast_background 点击参数
+        _fbAlpha.Value = config.FastBackground.WindowAlpha;
+        _fbDelayAfterRestore.Value = config.FastBackground.DelayAfterRestore;
+        _fbDelayBeforeClick.Value = config.FastBackground.DelayBeforeClick;
+        _fbDelayAfterMove.Value = config.FastBackground.DelayAfterMove;
+        _fbDelayAfterClick.Value = config.FastBackground.DelayAfterClick;
+        _fbDelayBeforeRestore.Value = config.FastBackground.DelayBeforeRestore;
+        _fbMinimizeAfterClick.Checked = config.FastBackground.MinimizeAfterClick;
+        _fbHideCursor.Checked = config.FastBackground.HideCursor;
+    }
+
+    private void RefreshOcrRegionsList()
+    {
+        _ocrRegionsListView.Items.Clear();
+        foreach (var region in _configService.Config.OcrRegions)
+        {
+            var item = new ListViewItem(region.Alias);
+            item.SubItems.Add(region.X.ToString());
+            item.SubItems.Add(region.Y.ToString());
+            item.SubItems.Add(region.Width.ToString());
+            item.SubItems.Add(region.Height.ToString());
+            item.SubItems.Add(region.Language switch { "zh" => "中文", "en" => "英文", _ => "自动" });
+            item.SubItems.Add(region.Enabled ? "是" : "否");
+            item.Tag = region;
+            _ocrRegionsListView.Items.Add(item);
+        }
     }
 
     private void RefreshClickPointsList()
@@ -507,6 +598,123 @@ public class ConfigForm : Form
 
     private void PreviewPoints_Click(object? sender, EventArgs e)
     {
+        PreviewAllRegions();
+    }
+
+    private void PreviewOcrRegions_Click(object? sender, EventArgs e)
+    {
+        PreviewAllRegions();
+    }
+
+    private void AddOcrRegion_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new OcrRegionEditForm(null);
+        if (dialog.ShowDialog() == DialogResult.OK && dialog.OcrRegion != null)
+        {
+            _configService.Config.OcrRegions.Add(dialog.OcrRegion);
+            RefreshOcrRegionsList();
+        }
+    }
+
+    private void EditOcrRegion_Click(object? sender, EventArgs e)
+    {
+        if (_ocrRegionsListView.SelectedItems.Count == 0)
+        {
+            MessageBox.Show("请先选择要编辑的 OCR 区域", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var selectedItem = _ocrRegionsListView.SelectedItems[0];
+        var region = selectedItem.Tag as OcrRegion;
+
+        using var dialog = new OcrRegionEditForm(region);
+        if (dialog.ShowDialog() == DialogResult.OK && dialog.OcrRegion != null)
+        {
+            var index = _configService.Config.OcrRegions.IndexOf(region!);
+            if (index >= 0)
+            {
+                _configService.Config.OcrRegions[index] = dialog.OcrRegion;
+                RefreshOcrRegionsList();
+            }
+        }
+    }
+
+    private void DeleteOcrRegion_Click(object? sender, EventArgs e)
+    {
+        if (_ocrRegionsListView.SelectedItems.Count == 0)
+        {
+            MessageBox.Show("请先选择要删除的 OCR 区域", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var result = MessageBox.Show("确定要删除选中的 OCR 区域吗？", "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (result == DialogResult.Yes)
+        {
+            var selectedItem = _ocrRegionsListView.SelectedItems[0];
+            var region = selectedItem.Tag as OcrRegion;
+            if (region != null)
+            {
+                _configService.Config.OcrRegions.Remove(region);
+                RefreshOcrRegionsList();
+            }
+        }
+    }
+
+    private void CaptureOcrRegion_Click(object? sender, EventArgs e)
+    {
+        if (_selectedWindow == null)
+        {
+            MessageBox.Show("请先选择目标窗口", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var bitmap = _screenshotService.CaptureWindow((IntPtr)_selectedWindow.Hwnd);
+        if (bitmap == null)
+        {
+            MessageBox.Show("截图失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var clientOrigin = _windowManager.GetClientAreaOrigin((IntPtr)_selectedWindow.Hwnd);
+        if (!NativeMethods.GetWindowRect((IntPtr)_selectedWindow.Hwnd, out var windowRect))
+        {
+            bitmap.Dispose();
+            return;
+        }
+
+        int offsetX = clientOrigin?.X - windowRect.Left ?? 0;
+        int offsetY = clientOrigin?.Y - windowRect.Top ?? 0;
+
+        using var selector = new RegionSelectorForm(bitmap, offsetX, offsetY);
+        var result = selector.ShowDialog();
+
+        if (result == DialogResult.OK && selector.HasSelection)
+        {
+            var selectedRegion = selector.SelectedRegion;
+
+            var newRegion = new OcrRegion
+            {
+                X = selectedRegion.X,
+                Y = selectedRegion.Y,
+                Width = selectedRegion.Width,
+                Height = selectedRegion.Height,
+                Language = "auto",
+                Enabled = true
+            };
+
+            using var dialog = new OcrRegionEditForm(newRegion);
+            if (dialog.ShowDialog() == DialogResult.OK && dialog.OcrRegion != null)
+            {
+                _configService.Config.OcrRegions.Add(dialog.OcrRegion);
+                RefreshOcrRegionsList();
+            }
+        }
+
+        bitmap.Dispose();
+    }
+
+    private void PreviewAllRegions()
+    {
         if (_selectedWindow == null)
         {
             MessageBox.Show("请先选择目标窗口", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -557,34 +765,29 @@ public class ConfigForm : Form
                 pointIndex++;
             }
 
-            // 绘制 OCR 区域1
-            if (_ocr1Enabled.Checked)
+            // 绘制 OCR 区域列表
+            var colors = new[] { Color.Blue, Color.Green, Color.Purple, Color.Orange, Color.Teal };
+            int regionIndex = 0;
+            foreach (var region in _configService.Config.OcrRegions)
             {
-                using var pen = new Pen(Color.Blue, 2);
-                pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                g.DrawRectangle(pen,
-                    (int)_ocr1X.Value + offsetX,
-                    (int)_ocr1Y.Value + offsetY,
-                    (int)_ocr1Width.Value,
-                    (int)_ocr1Height.Value);
-                g.DrawString("OCR区域1", this.Font, Brushes.Blue,
-                    (int)_ocr1X.Value + offsetX,
-                    (int)_ocr1Y.Value + offsetY - 15);
-            }
+                if (!region.Enabled) continue;
 
-            // 绘制 OCR 区域2
-            if (_ocr2Enabled.Checked)
-            {
-                using var pen = new Pen(Color.Green, 2);
+                var color = colors[regionIndex % colors.Length];
+                using var pen = new Pen(color, 2);
                 pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                 g.DrawRectangle(pen,
-                    (int)_ocr2X.Value + offsetX,
-                    (int)_ocr2Y.Value + offsetY,
-                    (int)_ocr2Width.Value,
-                    (int)_ocr2Height.Value);
-                g.DrawString("OCR区域2", this.Font, Brushes.Green,
-                    (int)_ocr2X.Value + offsetX,
-                    (int)_ocr2Y.Value + offsetY - 15);
+                    region.X + offsetX,
+                    region.Y + offsetY,
+                    region.Width,
+                    region.Height);
+
+                using var font = new Font("Microsoft YaHei", 9, FontStyle.Bold);
+                using var brush = new SolidBrush(color);
+                var label = string.IsNullOrEmpty(region.Alias) ? $"OCR区域{regionIndex + 1}" : region.Alias;
+                g.DrawString(label, font, brush,
+                    region.X + offsetX,
+                    region.Y + offsetY - 18);
+                regionIndex++;
             }
         }
 
@@ -619,96 +822,11 @@ public class ConfigForm : Form
         previewForm.Show();
     }
 
-    private void PreviewOcrRegions_Click(object? sender, EventArgs e)
-    {
-        PreviewPoints_Click(sender, e);
-    }
-
-    private void SelectOcrRegion(int regionNum)
-    {
-        if (_selectedWindow == null)
-        {
-            MessageBox.Show("请先选择目标窗口", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        var bitmap = _screenshotService.CaptureWindow((IntPtr)_selectedWindow.Hwnd);
-        if (bitmap == null)
-        {
-            MessageBox.Show("截图失败", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-
-        var clientOrigin = _windowManager.GetClientAreaOrigin((IntPtr)_selectedWindow.Hwnd);
-        if (!NativeMethods.GetWindowRect((IntPtr)_selectedWindow.Hwnd, out var windowRect))
-        {
-            bitmap.Dispose();
-            return;
-        }
-
-        int offsetX = clientOrigin?.X - windowRect.Left ?? 0;
-        int offsetY = clientOrigin?.Y - windowRect.Top ?? 0;
-
-        using var selector = new RegionSelectorForm(bitmap, offsetX, offsetY);
-        var result = selector.ShowDialog();
-
-        if (result == DialogResult.OK && selector.HasSelection)
-        {
-            var region = selector.SelectedRegion;
-
-            if (regionNum == 1)
-            {
-                _ocr1X.Value = Math.Max(0, region.X);
-                _ocr1Y.Value = Math.Max(0, region.Y);
-                _ocr1Width.Value = Math.Max(10, region.Width);
-                _ocr1Height.Value = Math.Max(10, region.Height);
-                _ocr1Enabled.Checked = true;
-            }
-            else
-            {
-                _ocr2X.Value = Math.Max(0, region.X);
-                _ocr2Y.Value = Math.Max(0, region.Y);
-                _ocr2Width.Value = Math.Max(10, region.Width);
-                _ocr2Height.Value = Math.Max(10, region.Height);
-                _ocr2Enabled.Checked = true;
-            }
-        }
-
-        bitmap.Dispose();
-    }
-
-    private void Ocr1Select_Click(object? sender, EventArgs e) => SelectOcrRegion(1);
-    private void Ocr2Select_Click(object? sender, EventArgs e) => SelectOcrRegion(2);
-
     private void SaveUIToConfig()
     {
         var config = _configService.Config;
 
-        // 保存 OCR 区域1
-        config.OcrRegion1.X = (int)_ocr1X.Value;
-        config.OcrRegion1.Y = (int)_ocr1Y.Value;
-        config.OcrRegion1.Width = (int)_ocr1Width.Value;
-        config.OcrRegion1.Height = (int)_ocr1Height.Value;
-        config.OcrRegion1.Enabled = _ocr1Enabled.Checked;
-        config.OcrRegion1.Language = _ocr1Lang.SelectedIndex switch
-        {
-            1 => "zh",
-            2 => "en",
-            _ => "auto"
-        };
-
-        // 保存 OCR 区域2
-        config.OcrRegion2.X = (int)_ocr2X.Value;
-        config.OcrRegion2.Y = (int)_ocr2Y.Value;
-        config.OcrRegion2.Width = (int)_ocr2Width.Value;
-        config.OcrRegion2.Height = (int)_ocr2Height.Value;
-        config.OcrRegion2.Enabled = _ocr2Enabled.Checked;
-        config.OcrRegion2.Language = _ocr2Lang.SelectedIndex switch
-        {
-            1 => "zh",
-            2 => "en",
-            _ => "auto"
-        };
+        // OCR 区域列表直接在添加/编辑时已保存到 config.OcrRegions
 
         // 保存 OCR 自动刷新设置
         config.OcrRefreshInterval = (int)_ocrRefreshInterval.Value * 1000;
@@ -716,6 +834,16 @@ public class ConfigForm : Form
 
         // 保存 OCR 引擎选择
         config.OcrEngine = _ocrEngineCombo.SelectedIndex == 1 ? "windows" : "paddle";
+
+        // 保存 fast_background 点击参数
+        config.FastBackground.WindowAlpha = (byte)_fbAlpha.Value;
+        config.FastBackground.DelayAfterRestore = (int)_fbDelayAfterRestore.Value;
+        config.FastBackground.DelayBeforeClick = (int)_fbDelayBeforeClick.Value;
+        config.FastBackground.DelayAfterMove = (int)_fbDelayAfterMove.Value;
+        config.FastBackground.DelayAfterClick = (int)_fbDelayAfterClick.Value;
+        config.FastBackground.DelayBeforeRestore = (int)_fbDelayBeforeRestore.Value;
+        config.FastBackground.MinimizeAfterClick = _fbMinimizeAfterClick.Checked;
+        config.FastBackground.HideCursor = _fbHideCursor.Checked;
     }
 
     private void SaveConfig_Click(object? sender, EventArgs e)
@@ -900,6 +1028,129 @@ public class ClickPointEditForm : Form
             Y = (int)_yInput.Value,
             ClickMode = _modeCombo.SelectedItem?.ToString() ?? "fast_background",
             Button = _buttonCombo.SelectedItem?.ToString() ?? "left"
+        };
+    }
+}
+
+/// <summary>
+/// OCR 区域编辑对话框
+/// </summary>
+public class OcrRegionEditForm : Form
+{
+    private TextBox _aliasText = null!;
+    private NumericUpDown _xInput = null!;
+    private NumericUpDown _yInput = null!;
+    private NumericUpDown _widthInput = null!;
+    private NumericUpDown _heightInput = null!;
+    private ComboBox _langCombo = null!;
+    private CheckBox _enabledCheckbox = null!;
+
+    public OcrRegion? OcrRegion { get; private set; }
+
+    public OcrRegionEditForm(OcrRegion? existing)
+    {
+        InitializeComponent();
+
+        if (existing != null)
+        {
+            _aliasText.Text = existing.Alias;
+            _xInput.Value = existing.X;
+            _yInput.Value = existing.Y;
+            _widthInput.Value = Math.Max(10, existing.Width);
+            _heightInput.Value = Math.Max(10, existing.Height);
+            _langCombo.SelectedIndex = existing.Language switch
+            {
+                "zh" => 1,
+                "en" => 2,
+                _ => 0
+            };
+            _enabledCheckbox.Checked = existing.Enabled;
+        }
+    }
+
+    private void InitializeComponent()
+    {
+        this.Text = "编辑 OCR 区域";
+        this.Size = new Size(380, 320);
+        this.StartPosition = FormStartPosition.CenterParent;
+        this.FormBorderStyle = FormBorderStyle.FixedDialog;
+        this.MaximizeBox = false;
+        this.MinimizeBox = false;
+
+        int y = 20;
+        int labelWidth = 70;
+        int inputLeft = 90;
+
+        var aliasLabel = new Label { Text = "别名:", Location = new Point(20, y + 3), Width = labelWidth };
+        _aliasText = new TextBox { Location = new Point(inputLeft, y), Width = 200 };
+        y += 35;
+
+        var xLabel = new Label { Text = "X:", Location = new Point(20, y + 3), Width = labelWidth };
+        _xInput = new NumericUpDown { Location = new Point(inputLeft, y), Width = 100, Minimum = 0, Maximum = 10000 };
+        y += 35;
+
+        var yLabel = new Label { Text = "Y:", Location = new Point(20, y + 3), Width = labelWidth };
+        _yInput = new NumericUpDown { Location = new Point(inputLeft, y), Width = 100, Minimum = 0, Maximum = 10000 };
+        y += 35;
+
+        var widthLabel = new Label { Text = "宽度:", Location = new Point(20, y + 3), Width = labelWidth };
+        _widthInput = new NumericUpDown { Location = new Point(inputLeft, y), Width = 100, Minimum = 10, Maximum = 2000, Value = 200 };
+        y += 35;
+
+        var heightLabel = new Label { Text = "高度:", Location = new Point(20, y + 3), Width = labelWidth };
+        _heightInput = new NumericUpDown { Location = new Point(inputLeft, y), Width = 100, Minimum = 10, Maximum = 2000, Value = 50 };
+        y += 35;
+
+        var langLabel = new Label { Text = "语言:", Location = new Point(20, y + 3), Width = labelWidth };
+        _langCombo = new ComboBox { Location = new Point(inputLeft, y), Width = 100, DropDownStyle = ComboBoxStyle.DropDownList };
+        _langCombo.Items.AddRange(new object[] { "自动", "中文", "英文" });
+        _langCombo.SelectedIndex = 0;
+
+        _enabledCheckbox = new CheckBox { Text = "启用", Location = new Point(200, y), Checked = true };
+        y += 45;
+
+        var okBtn = new Button { Text = "确定", Location = new Point(100, y), Width = 80, DialogResult = DialogResult.OK };
+        okBtn.Click += OkBtn_Click;
+
+        var cancelBtn = new Button { Text = "取消", Location = new Point(190, y), Width = 80, DialogResult = DialogResult.Cancel };
+
+        this.Controls.AddRange(new Control[] {
+            aliasLabel, _aliasText,
+            xLabel, _xInput,
+            yLabel, _yInput,
+            widthLabel, _widthInput,
+            heightLabel, _heightInput,
+            langLabel, _langCombo, _enabledCheckbox,
+            okBtn, cancelBtn
+        });
+
+        this.AcceptButton = okBtn;
+        this.CancelButton = cancelBtn;
+    }
+
+    private void OkBtn_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_aliasText.Text))
+        {
+            MessageBox.Show("请输入别名", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            this.DialogResult = DialogResult.None;
+            return;
+        }
+
+        OcrRegion = new OcrRegion
+        {
+            Alias = _aliasText.Text.Trim(),
+            X = (int)_xInput.Value,
+            Y = (int)_yInput.Value,
+            Width = (int)_widthInput.Value,
+            Height = (int)_heightInput.Value,
+            Language = _langCombo.SelectedIndex switch
+            {
+                1 => "zh",
+                2 => "en",
+                _ => "auto"
+            },
+            Enabled = _enabledCheckbox.Checked
         };
     }
 }

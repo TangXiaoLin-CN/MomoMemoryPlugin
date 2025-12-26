@@ -6,7 +6,8 @@ import { BackendClient, BackendConfig, BackendClickPoint } from './backendClient
 /**
  * Status Bar Manager - displays OCR results and click buttons from backend config
  *
- * Layout: [Window] [OCR1: xxx] [OCR2: xxx] [Button1] [Button2] ... [Refresh]
+ * Default Layout: [Window] [Button1] [Button2] ... [OCR1: xxx] [OCR2: xxx] [Refresh]
+ * Customizable via momo.statusBarLayout setting
  */
 export class StatusBarManager {
   private static instance: StatusBarManager;
@@ -17,19 +18,21 @@ export class StatusBarManager {
 
   // Status bar items
   private windowStatusItem: vscode.StatusBarItem | null = null;
-  private ocr1StatusItem: vscode.StatusBarItem | null = null;
-  private ocr2StatusItem: vscode.StatusBarItem | null = null;
+  private ocrStatusItems: Map<string, vscode.StatusBarItem> = new Map();
   private refreshButton: vscode.StatusBarItem | null = null;
   private clickButtons: Map<string, vscode.StatusBarItem> = new Map();
 
   // OCR state
-  private ocr1Text: string = '';
-  private ocr2Text: string = '';
+  private ocrResults: Map<string, string> = new Map();
   private autoRefreshTimer: NodeJS.Timeout | null = null;
   private isRefreshing: boolean = false;
 
   // Backend config cache
   private backendConfig: BackendConfig | null = null;
+
+  // Layout configuration
+  private layoutOrder: string[] = ['window', 'buttons', 'ocr', 'refresh'];
+  private alignment: vscode.StatusBarAlignment = vscode.StatusBarAlignment.Left;
 
   private constructor() {
     this.configManager = ConfigManager.getInstance();
@@ -48,51 +51,109 @@ export class StatusBarManager {
    * Initialize status bar items
    */
   public async initialize(): Promise<void> {
+    // Load layout configuration
+    this.loadLayoutConfig();
+
     // Load backend config first
     await this.loadBackendConfig();
 
-    // Create window status item (leftmost)
-    this.windowStatusItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      1000
-    );
-    this.windowStatusItem.command = 'momo.selectWindow';
-    this.updateWindowStatus();
-    this.windowStatusItem.show();
+    // Calculate priorities based on layout order
+    const priorities = this.calculatePriorities();
 
-    // Create OCR status items
-    this.ocr1StatusItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      999
-    );
-    this.ocr1StatusItem.command = 'momo.captureOCR';
-    this.updateOcr1Status();
-    this.ocr1StatusItem.show();
+    // Create status bar items based on layout order
+    for (const item of this.layoutOrder) {
+      switch (item) {
+        case 'window':
+          this.windowStatusItem = vscode.window.createStatusBarItem(
+            this.alignment,
+            priorities.get('window') || 1000
+          );
+          this.windowStatusItem.command = 'momo.selectWindow';
+          this.updateWindowStatus();
+          this.windowStatusItem.show();
+          break;
 
-    this.ocr2StatusItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      998
-    );
-    this.ocr2StatusItem.command = 'momo.captureOCR';
-    this.updateOcr2Status();
-    this.ocr2StatusItem.show();
+        case 'buttons':
+          await this.updateClickButtons(priorities.get('buttons') || 990);
+          break;
 
-    // Create click buttons from backend config
-    await this.updateClickButtons();
+        case 'ocr':
+          await this.updateOcrStatusItems(priorities.get('ocr') || 920);
+          break;
 
-    // Create refresh button (rightmost of our items)
-    this.refreshButton = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      900
-    );
-    this.refreshButton.text = '$(refresh)';
-    this.refreshButton.tooltip = 'Refresh OCR';
-    this.refreshButton.command = 'momo.captureOCR';
-    this.refreshButton.show();
+        case 'refresh':
+          this.refreshButton = vscode.window.createStatusBarItem(
+            this.alignment,
+            priorities.get('refresh') || 900
+          );
+          this.refreshButton.text = '$(refresh)';
+          this.refreshButton.tooltip = 'Refresh OCR and Config (Ctrl+Alt+O)';
+          this.refreshButton.command = 'momo.captureOCR';
+          this.refreshButton.show();
+          break;
+      }
+    }
 
     // Start auto-refresh if configured
     this.setupAutoRefresh();
   }
+
+  /**
+   * Load layout configuration from VS Code settings
+   */
+  private loadLayoutConfig(): void {
+    const config = vscode.workspace.getConfiguration('momo');
+
+    // Parse layout order
+    const layoutStr = config.get<string>('statusBarLayout', 'window,buttons,ocr,refresh');
+    this.layoutOrder = layoutStr.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+
+    // Validate layout items - convert legacy ocr1/ocr2 to ocr
+    const validItems = ['window', 'buttons', 'ocr', 'refresh'];
+    this.layoutOrder = this.layoutOrder
+      .map(item => (item === 'ocr1' || item === 'ocr2') ? 'ocr' : item)
+      .filter(item => validItems.includes(item));
+
+    // Remove duplicates
+    this.layoutOrder = [...new Set(this.layoutOrder)];
+
+    // Ensure all items are present (add missing ones at the end)
+    for (const item of validItems) {
+      if (!this.layoutOrder.includes(item)) {
+        this.layoutOrder.push(item);
+      }
+    }
+
+    // Parse alignment
+    const alignmentStr = config.get<string>('statusBarAlignment', 'left');
+    this.alignment = alignmentStr === 'right'
+      ? vscode.StatusBarAlignment.Right
+      : vscode.StatusBarAlignment.Left;
+
+    console.log(`Status bar layout: ${this.layoutOrder.join(' -> ')}, alignment: ${alignmentStr}`);
+  }
+
+  /**
+   * Calculate priorities based on layout order
+   * For left alignment: higher priority = more to the left
+   * For right alignment: lower priority = more to the right
+   */
+  private calculatePriorities(): Map<string, number> {
+    const priorities = new Map<string, number>();
+    const baseP = 1000;
+    const step = 10;
+
+    for (let i = 0; i < this.layoutOrder.length; i++) {
+      const item = this.layoutOrder[i];
+      // Higher priority for items that should appear first (left for Left alignment)
+      priorities.set(item, baseP - i * step);
+    }
+
+    return priorities;
+  }
+
+  // Store current button priority for updateClickButtons
+  private currentButtonPriority: number = 990;
 
   /**
    * Load config from backend
@@ -132,76 +193,87 @@ export class StatusBarManager {
   }
 
   /**
-   * Update OCR region 1 status
+   * Update OCR status items dynamically based on config
    */
-  private updateOcr1Status(): void {
-    if (!this.ocr1StatusItem) return;
+  private async updateOcrStatusItems(basePriority?: number): Promise<void> {
+    // Clear existing OCR status items
+    for (const [, item] of this.ocrStatusItems) {
+      item.hide();
+      item.dispose();
+    }
+    this.ocrStatusItems.clear();
 
-    if (!this.backendConfig) {
-      this.ocr1StatusItem.text = '$(warning) OCR1: No Config';
-      this.ocr1StatusItem.tooltip = 'Backend config not loaded. Click to refresh.';
+    // Small delay for UI update
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    if (!this.backendConfig?.ocrRegions || this.backendConfig.ocrRegions.length === 0) {
+      console.log('No OCR regions in backend config');
       return;
     }
 
-    const region = this.backendConfig.ocrRegion1;
-    if (!region || !region.enabled) {
-      this.ocr1StatusItem.text = '$(eye-closed) OCR1: Disabled';
-      this.ocr1StatusItem.tooltip = 'OCR Region 1 is disabled in backend config';
-      return;
+    console.log(`Creating ${this.backendConfig.ocrRegions.length} OCR status items`);
+
+    // Use provided priority or default
+    let priority = basePriority ?? this.currentOcrPriority;
+    if (basePriority !== undefined) {
+      this.currentOcrPriority = basePriority;
     }
 
-    if (this.ocr1Text) {
-      const shortText = this.ocr1Text.length > 20
-        ? this.ocr1Text.substring(0, 20) + '...'
-        : this.ocr1Text;
-      this.ocr1StatusItem.text = `$(eye) OCR1: ${shortText}`;
-      this.ocr1StatusItem.tooltip = `OCR Region 1:\n${this.ocr1Text}\n\nRegion: (${region.x}, ${region.y}) ${region.width}x${region.height}`;
-    } else {
-      this.ocr1StatusItem.text = '$(eye) OCR1: --';
-      this.ocr1StatusItem.tooltip = `OCR Region 1: No content\nRegion: (${region.x}, ${region.y}) ${region.width}x${region.height}`;
+    // Create status items for each OCR region
+    for (const region of this.backendConfig.ocrRegions) {
+      if (!region.enabled) continue;
+
+      const statusItem = vscode.window.createStatusBarItem(
+        this.alignment,
+        priority--
+      );
+      statusItem.command = 'momo.captureOCR';
+
+      // Get cached OCR result if available
+      const ocrText = this.ocrResults.get(region.alias) || '';
+      this.updateOcrStatusItem(statusItem, region.alias, ocrText, region);
+
+      statusItem.show();
+      this.ocrStatusItems.set(region.alias, statusItem);
+      console.log(`Created OCR status item: ${region.alias}`);
     }
   }
 
   /**
-   * Update OCR region 2 status
+   * Update single OCR status item display
    */
-  private updateOcr2Status(): void {
-    if (!this.ocr2StatusItem) return;
-
-    if (!this.backendConfig) {
-      this.ocr2StatusItem.text = '$(warning) OCR2: No Config';
-      this.ocr2StatusItem.tooltip = 'Backend config not loaded. Click to refresh.';
-      return;
-    }
-
-    const region = this.backendConfig.ocrRegion2;
-    if (!region || !region.enabled) {
-      this.ocr2StatusItem.text = '$(eye-closed) OCR2: Disabled';
-      this.ocr2StatusItem.tooltip = 'OCR Region 2 is disabled in backend config';
-      return;
-    }
-
-    if (this.ocr2Text) {
-      const shortText = this.ocr2Text.length > 20
-        ? this.ocr2Text.substring(0, 20) + '...'
-        : this.ocr2Text;
-      this.ocr2StatusItem.text = `$(eye) OCR2: ${shortText}`;
-      this.ocr2StatusItem.tooltip = `OCR Region 2:\n${this.ocr2Text}\n\nRegion: (${region.x}, ${region.y}) ${region.width}x${region.height}`;
+  private updateOcrStatusItem(
+    statusItem: vscode.StatusBarItem,
+    alias: string,
+    text: string,
+    region: { x: number; y: number; width: number; height: number; enabled: boolean }
+  ): void {
+    if (text) {
+      const shortText = text.length > 20 ? text.substring(0, 20) + '...' : text;
+      statusItem.text = `$(eye) ${alias}: ${shortText}`;
+      statusItem.tooltip = `${alias}:\n${text}\n\nRegion: (${region.x}, ${region.y}) ${region.width}x${region.height}`;
     } else {
-      this.ocr2StatusItem.text = '$(eye) OCR2: --';
-      this.ocr2StatusItem.tooltip = `OCR Region 2: No content\nRegion: (${region.x}, ${region.y}) ${region.width}x${region.height}`;
+      statusItem.text = `$(eye) ${alias}: --`;
+      statusItem.tooltip = `${alias}: No content\nRegion: (${region.x}, ${region.y}) ${region.width}x${region.height}`;
     }
   }
+
+  // Store current OCR priority for updateOcrStatusItems
+  private currentOcrPriority: number = 920;
 
   /**
    * Update click buttons from backend config
    */
-  public async updateClickButtons(): Promise<void> {
-    // Clear existing buttons
+  public async updateClickButtons(basePriority?: number): Promise<void> {
+    // Clear existing buttons - hide first, then dispose
     for (const [, button] of this.clickButtons) {
+      button.hide();
       button.dispose();
     }
     this.clickButtons.clear();
+
+    // Small delay to let VS Code update UI
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     // Don't reload config here - use cached config
     if (!this.backendConfig?.clickPoints || this.backendConfig.clickPoints.length === 0) {
@@ -211,11 +283,16 @@ export class StatusBarManager {
 
     console.log(`Creating ${this.backendConfig.clickPoints.length} click buttons`);
 
+    // Use provided priority or stored priority
+    let priority = basePriority ?? this.currentButtonPriority;
+    if (basePriority !== undefined) {
+      this.currentButtonPriority = basePriority;
+    }
+
     // Create buttons for each click point
-    let priority = 997;
     for (const point of this.backendConfig.clickPoints) {
       const button = vscode.window.createStatusBarItem(
-        vscode.StatusBarAlignment.Left,
+        this.alignment,
         priority--
       );
       button.text = `$(play) ${point.alias}`;
@@ -259,9 +336,9 @@ export class StatusBarManager {
   }
 
   /**
-   * Perform OCR on both regions
+   * Perform OCR on all enabled regions (and refresh config/buttons)
    */
-  public async performOCR(): Promise<{ ocr1: string; ocr2: string } | null> {
+  public async performOCR(): Promise<Map<string, string> | null> {
     if (this.isRefreshing) return null;
     this.isRefreshing = true;
 
@@ -282,16 +359,35 @@ export class StatusBarManager {
         return null;
       }
 
-      // Reload config to get latest settings
+      // Reload config to get latest settings (including OCR regions)
+      const oldConfig = this.backendConfig;
       await this.loadBackendConfig();
       if (!this.backendConfig) {
         vscode.window.showWarningMessage('Failed to load backend config');
         return null;
       }
 
-      // Perform OCR on region 1
-      if (this.backendConfig.ocrRegion1?.enabled) {
-        const region = this.backendConfig.ocrRegion1;
+      // Only update click buttons and OCR status items if config changed
+      const configChanged = !oldConfig ||
+        JSON.stringify(oldConfig.clickPoints) !== JSON.stringify(this.backendConfig.clickPoints) ||
+        JSON.stringify(oldConfig.ocrRegions) !== JSON.stringify(this.backendConfig.ocrRegions);
+
+      if (configChanged) {
+        console.log('Config changed, updating UI elements');
+        await this.updateClickButtons();
+        await this.updateOcrStatusItems();
+      }
+
+      // Check if there are any OCR regions
+      if (!this.backendConfig.ocrRegions || this.backendConfig.ocrRegions.length === 0) {
+        console.log('No OCR regions configured');
+        return this.ocrResults;
+      }
+
+      // Perform OCR on all enabled regions
+      for (const region of this.backendConfig.ocrRegions) {
+        if (!region.enabled) continue;
+
         const result = await this.backendClient.ocr(
           targetWindow.hwnd,
           region.x,
@@ -300,26 +396,20 @@ export class StatusBarManager {
           region.height,
           region.language || 'auto'
         );
-        this.ocr1Text = result.success ? result.text : '';
-        this.updateOcr1Status();
+
+        const ocrText = result.success ? result.text : '';
+        this.ocrResults.set(region.alias, ocrText);
+
+        // Update the corresponding status item
+        const statusItem = this.ocrStatusItems.get(region.alias);
+        if (statusItem) {
+          this.updateOcrStatusItem(statusItem, region.alias, ocrText, region);
+        } else {
+          console.log(`Status item not found for alias: ${region.alias}`);
+        }
       }
 
-      // Perform OCR on region 2
-      if (this.backendConfig.ocrRegion2?.enabled) {
-        const region = this.backendConfig.ocrRegion2;
-        const result = await this.backendClient.ocr(
-          targetWindow.hwnd,
-          region.x,
-          region.y,
-          region.width,
-          region.height,
-          region.language || 'auto'
-        );
-        this.ocr2Text = result.success ? result.text : '';
-        this.updateOcr2Status();
-      }
-
-      return { ocr1: this.ocr1Text, ocr2: this.ocr2Text };
+      return this.ocrResults;
     } catch (error) {
       console.error('OCR failed:', error);
       vscode.window.showErrorMessage(`OCR failed: ${error}`);
@@ -376,8 +466,8 @@ export class StatusBarManager {
   /**
    * Get current OCR results
    */
-  public getOCRResults(): { ocr1: string; ocr2: string } {
-    return { ocr1: this.ocr1Text, ocr2: this.ocr2Text };
+  public getOCRResults(): Map<string, string> {
+    return new Map(this.ocrResults);
   }
 
   /**
@@ -386,9 +476,8 @@ export class StatusBarManager {
   public async refreshFromBackend(): Promise<void> {
     await this.loadBackendConfig();
     await this.updateClickButtons();
+    await this.updateOcrStatusItems();
     this.setupAutoRefresh();
-    this.updateOcr1Status();
-    this.updateOcr2Status();
   }
 
   /**
@@ -402,15 +491,10 @@ export class StatusBarManager {
       this.windowStatusItem = null;
     }
 
-    if (this.ocr1StatusItem) {
-      this.ocr1StatusItem.dispose();
-      this.ocr1StatusItem = null;
+    for (const [, item] of this.ocrStatusItems) {
+      item.dispose();
     }
-
-    if (this.ocr2StatusItem) {
-      this.ocr2StatusItem.dispose();
-      this.ocr2StatusItem = null;
-    }
+    this.ocrStatusItems.clear();
 
     if (this.refreshButton) {
       this.refreshButton.dispose();

@@ -75,6 +75,58 @@ public static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr LoadCursor(IntPtr hInstance, int lpCursorName);
 
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetCursor();
+
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorInfo(ref CURSORINFO pci);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetSystemCursor(IntPtr hcur, uint id);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr CopyIcon(IntPtr hIcon);  // 也可用于复制光标
+
+    [DllImport("user32.dll")]
+    public static extern bool DestroyCursor(IntPtr hCursor);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    // 光标结构体
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CURSORINFO
+    {
+        public int cbSize;
+        public int flags;
+        public IntPtr hCursor;
+        public POINT ptScreenPos;
+    }
+
+    // 系统光标 ID
+    public const uint OCR_NORMAL = 32512;      // 标准箭头
+    public const uint OCR_IBEAM = 32513;       // I 型光标
+    public const uint OCR_WAIT = 32514;        // 等待
+    public const uint OCR_CROSS = 32515;       // 十字
+    public const uint OCR_UP = 32516;          // 向上箭头
+    public const uint OCR_SIZENWSE = 32642;    // 双向箭头 (NW-SE)
+    public const uint OCR_SIZENESW = 32643;    // 双向箭头 (NE-SW)
+    public const uint OCR_SIZEWE = 32644;      // 双向箭头 (W-E)
+    public const uint OCR_SIZENS = 32645;      // 双向箭头 (N-S)
+    public const uint OCR_SIZEALL = 32646;     // 四向箭头
+    public const uint OCR_NO = 32648;          // 禁止
+    public const uint OCR_HAND = 32649;        // 手形
+    public const uint OCR_APPSTARTING = 32650; // 后台运行
+
+    // CURSORINFO flags
+    public const int CURSOR_SHOWING = 0x00000001;
+
+    // SystemParametersInfo
+    public const uint SPI_SETCURSORS = 0x0057;
+
     public const int IDC_ARROW = 32512;
 
     // ==================== 窗口枚举 ====================

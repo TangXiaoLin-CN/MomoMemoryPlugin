@@ -97,6 +97,17 @@
           "type": "number",
           "default": 5678,
           "description": "Port number for MomoBackend HTTP API"
+        },
+        "momo.statusBarLayout": {
+          "type": "string",
+          "default": "window,buttons,ocr,refresh",
+          "description": "Status bar items order (comma-separated). Available items: window, buttons, ocr, refresh. Example: 'window,ocr,buttons,refresh'"
+        },
+        "momo.statusBarAlignment": {
+          "type": "string",
+          "enum": ["left", "right"],
+          "default": "left",
+          "description": "Status bar alignment (left or right)"
         }
       }
     }

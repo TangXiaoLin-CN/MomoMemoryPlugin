@@ -5,9 +5,9 @@ VS Code / Cursor 窗口自动化插件，用于窗口操作、OCR 文字识别�
 ## 功能特点
 
 - **窗口选择** - 选择目标窗口进行操作
-- **OCR 识别** - 支持两个 OCR 区域，使用 PaddleOCR 进行高精度中英文识别
-- **自动点击** - 支持多种点击模式，包括后台点击（不干扰前台操作）
-- **状态栏集成** - 在 VS Code 状态栏显示 OCR 结果和快捷点击按钮
+- **OCR 识别** - 支持多个 OCR 区域，可自定义别名，使用 PaddleOCR 进行高精度中英文识别
+- **自动点击** - 支持多个点击位置，可设置别名，支持多种点击模式（包括后台点击）
+- **状态栏集成** - 在 VS Code 状态栏显示 OCR 结果和快捷点击按钮，布局可自定义
 - **配置同步** - OCR 区域和点击坐标在后端配置，插件自动读取
 
 ## 项目结构
@@ -27,7 +27,8 @@ MomoMemoryPlugin/
 │   │   ├── MouseController.cs    # 鼠标控制
 │   │   ├── WindowManager.cs      # 窗口管理
 │   │   └── ...
-│   ├── MainForm.cs               # 后端主窗口（配置界面）
+│   ├── ConfigForm.cs             # 配置界面
+│   ├── TestForm.cs               # 测试界面
 │   └── momo-config.json          # 配置文件
 ├── package.json                  # 插件配置
 └── README.md
@@ -54,7 +55,7 @@ MomoMemoryPlugin/
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/TangXiaoLin-CN/MomoMemoryPlugin.git
+git clone https://github.com/your-repo/MomoMemoryPlugin.git
 cd MomoMemoryPlugin
 
 # 2. 安装插件依赖
@@ -67,10 +68,7 @@ npm run compile
 cd MomoMemoryPlugin-backend
 dotnet publish -c Release -o ../backend
 
-# 5. 复制 PaddleOCR 原生库（从 NuGet 缓存）
-# Windows: %USERPROFILE%\.nuget\packages\paddle.runtime.win_x64\3.2.2\build\win_x64\
-
-# 6. 打包插件
+# 5. 打包插件
 cd ..
 npx @vscode/vsce package
 ```
@@ -79,26 +77,26 @@ npx @vscode/vsce package
 
 ### 1. 配置后端
 
-首次使用需要配置 OCR 区域和点击坐标，有两种方式：
+首次使用需要配置 OCR 区域和点击坐标：
 
 **方式一：通过 VS Code 命令**
 1. 按 `Ctrl+Shift+P` 打开命令面板
 2. 输入 `Momo: Open Backend Config Window`
-3. 在弹出的配置窗口中设置 OCR 区域和点击坐标
+3. 在弹出的配置窗口中：
+   - **点击区域**：添加多个点击位置，设置别名和坐标
+   - **OCR 区域**：添加多个 OCR 识别区域，设置别名、位置和大小
 4. 保存后使用 `Momo: Refresh Config` 刷新配置
 
 **方式二：直接运行后端**
 1. 直接运行 `MomoBackend.exe`（非 headless 模式）打开配置界面
-2. 配置 OCR 区域 1 和 2 的位置、大小
-3. 添加需要的点击坐标并设置别名
-4. 保存配置
+2. 配置后保存
 
 ### 2. 使用插件
 
 1. 打开 VS Code/Cursor
 2. 插件会自动启动后端（headless 模式）
 3. 按 `Ctrl+Alt+W` 选择目标窗口
-4. 状态栏会显示：`[窗口名] [OCR1: 内容] [OCR2: 内容] [按钮1] [按钮2] ... [刷新]`
+4. 状态栏显示：`[窗口名] [按钮1] [按钮2] ... [OCR区域1: 内容] [OCR区域2: 内容] ... [刷新]`
 5. 点击状态栏按钮执行对应操作
 
 ## 快捷键
@@ -131,19 +129,38 @@ npx @vscode/vsce package
 | `momo.useBackend` | 使用后端服务 | `true` |
 | `momo.autoStartBackend` | 自动启动后端 | `true` |
 | `momo.backendPort` | 后端 API 端口 | `5678` |
+| `momo.statusBarLayout` | 状态栏布局顺序 | `window,buttons,ocr,refresh` |
+| `momo.statusBarAlignment` | 状态栏对齐方式 | `left` |
+
+### 状态栏布局自定义
+
+通过 `momo.statusBarLayout` 可自定义状态栏项目顺序，用逗号分隔：
+
+- `window` - 窗口选择按钮
+- `buttons` - 点击按钮组
+- `ocr` - OCR 结果显示
+- `refresh` - 刷新按钮
+
+示例：`ocr,buttons,window,refresh` 会将 OCR 显示在最左边
 
 ### 后端配置 (momo-config.json)
 
 ```json
 {
   "version": 1,
+  "targetWindowTitle": "",
+  "targetProcessName": "",
   "clickPoints": [
-    { "alias": "按钮1", "x": 100, "y": 200, "clickMode": "fast_background", "button": "left" }
+    { "alias": "开始", "x": 100, "y": 200, "clickMode": "fast_background", "button": "left" },
+    { "alias": "确认", "x": 300, "y": 400, "clickMode": "fast_background", "button": "left" }
   ],
-  "ocrRegion1": { "name": "区域1", "x": 0, "y": 0, "width": 200, "height": 50, "enabled": true },
-  "ocrRegion2": { "name": "区域2", "x": 0, "y": 50, "width": 200, "height": 50, "enabled": true },
+  "ocrRegions": [
+    { "alias": "状态", "x": 10, "y": 10, "width": 200, "height": 30, "language": "auto", "enabled": true },
+    { "alias": "数值", "x": 10, "y": 50, "width": 100, "height": 25, "language": "auto", "enabled": true }
+  ],
   "ocrRefreshInterval": 3000,
-  "ocrAutoRefresh": false
+  "ocrAutoRefresh": false,
+  "ocrEngine": "paddle"
 }
 ```
 
@@ -154,7 +171,7 @@ npx @vscode/vsce package
 | 模式 | 说明 |
 |------|------|
 | `foreground` | 前台点击（移动鼠标） |
-| `fast_background` | 快速后台点击（推荐） |
+| `fast_background` | 快速后台点击（推荐，几乎无感知） |
 | `background_post` | PostMessage 后台点击 |
 | `background_send` | SendMessage 后台点击 |
 
@@ -163,7 +180,7 @@ npx @vscode/vsce package
 ### 插件 (TypeScript)
 - VS Code Extension API
 - HTTP 客户端与后端通信
-- 状态栏 UI 管理
+- 动态状态栏 UI 管理
 
 ### 后端 (C# .NET 8)
 - **OCR**: PaddleOCR Sharp - 高精度中英文识别
@@ -183,10 +200,13 @@ npx @vscode/vsce package
 A: 检查 5678 端口是否被占用，或查看 `Momo: Show Backend Output` 日志。
 
 ### Q: OCR 识别不准确？
-A: 确保 OCR 区域配置正确，PaddleOCR 对清晰文字识别效果最佳。
+A: 确保 OCR 区域配置正确，PaddleOCR 对清晰文字识别效果最佳。可在配置界面使用"预览"功能检查区域是否正确。
 
 ### Q: 点击没有响应？
-A: 尝试切换点击模式，某些应用可能需要特定模式才能响应。
+A: 尝试切换点击模式，某些应用可能需要特定模式才能响应。推荐使用 `fast_background` 模式。
+
+### Q: 状态栏项目顺序不对？
+A: 在 VS Code 设置中修改 `momo.statusBarLayout`，自定义显示顺序。
 
 ## License
 

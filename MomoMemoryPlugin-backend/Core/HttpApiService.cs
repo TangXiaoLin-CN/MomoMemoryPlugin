@@ -33,6 +33,22 @@ public class HttpApiService : IDisposable
         _mouseController = new MouseController();
         _screenshotService = new ScreenshotService();
         _configService = new ConfigService();
+
+        // 连接 MouseController 的日志到本服务的日志
+        _mouseController.OnLog += (msg) => Log(msg);
+
+        // 将配置同步到 MouseController
+        SyncMouseControllerSettings();
+    }
+
+    /// <summary>
+    /// 将配置同步到 MouseController
+    /// </summary>
+    private void SyncMouseControllerSettings()
+    {
+        var settings = _configService.Config.FastBackground;
+        Log($"[配置同步] HideCursor={settings.HideCursor}, Alpha={settings.WindowAlpha}, Minimize={settings.MinimizeAfterClick}");
+        _mouseController.SetFastBackgroundSettings(settings);
     }
 
     public void Start()
@@ -197,6 +213,10 @@ public class HttpApiService : IDisposable
         {
             return new { success = false, error = "Invalid request body" };
         }
+
+        // 重新加载配置并同步设置（确保使用最新配置）
+        _configService.Load();
+        SyncMouseControllerSettings();
 
         // 获取客户区原点
         var clientOrigin = _windowManager.GetClientAreaOrigin((IntPtr)clickRequest.Hwnd);
