@@ -1,18 +1,26 @@
 using System.Drawing;
-using PaddleOCRSharp;
+using System.Drawing.Imaging;
+using OpenCvSharp;
+using OpenCvSharp.Extensions;
+using Sdcb.PaddleInference;
+using Sdcb.PaddleOCR;
+using Sdcb.PaddleOCR.Models.Local;
 
 namespace MomoBackend.Core;
 
 /// <summary>
-/// PaddleOCR 识别服务 - 使用 PaddleOCRSharp 实现高精度中文识别
+/// PaddleOCR 识别服务 - 使用 Sdcb.PaddleOCR 实现高精度中文识别
 /// 使用单例模式，避免重复初始化
+///
+/// 已从 PaddleOCRSharp 迁移到 Sdcb.PaddleOCR (更可信的开源库)
+/// GitHub: https://github.com/sdcb/PaddleSharp
 /// </summary>
 public class PaddleOcrService : IDisposable
 {
     private static PaddleOcrService? _instance;
     private static readonly object _lock = new();
 
-    private PaddleOCREngine? _engine;
+    private PaddleOcrAll? _engine;
     private bool _isInitialized;
     private bool _isInitializing;
     private string _initError = "";
@@ -60,28 +68,24 @@ public class PaddleOcrService : IDisposable
         _isInitializing = true;
         try
         {
-            // OCR 参数配置
-            var oCRParameter = new OCRParameter
+            // 使用中文 V4 模型（本地模型，无需下载）
+            var model = LocalFullModels.ChineseV4;
+
+            _engine = new PaddleOcrAll(model, PaddleDevice.Mkldnn())
             {
-                cpu_math_library_num_threads = 6,
-                enable_mkldnn = true,
-                det_db_score_mode = true,
-                det_db_unclip_ratio = 1.6f,
-                use_angle_cls = true,
-                det = true,
-                rec = true,
-                cls = true
+                AllowRotateDetection = true,    // 允许识别有角度的文字
+                Enable180Classification = false  // 不启用180度分类（提高速度）
             };
 
-            // 创建引擎（使用内置模型）
-            _engine = new PaddleOCREngine(null, oCRParameter);
             _isInitialized = true;
+            _initError = "";
+            System.Diagnostics.Debug.WriteLine("[PaddleOCR] Sdcb.PaddleOCR 引擎初始化成功 (ChineseV4 模型)");
         }
         catch (Exception ex)
         {
             _isInitialized = false;
             _initError = ex.Message;
-            System.Diagnostics.Debug.WriteLine($"PaddleOCR 初始化失败: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[PaddleOCR] 初始化失败: {ex.Message}");
         }
         finally
         {
@@ -115,41 +119,37 @@ public class PaddleOcrService : IDisposable
 
         try
         {
+            // 将 Bitmap 转换为 OpenCV Mat
+            using var mat = BitmapToMat(bitmap);
+
             // 执行 OCR 识别
-            var ocrResult = _engine.DetectText(bitmap);
+            var ocrResult = _engine.Run(mat);
 
-            if (ocrResult != null)
+            result.Success = true;
+            // 将换行符替换为空格
+            result.Text = (ocrResult.Text ?? "").Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
+            result.Confidence = ocrResult.Regions.Any() ? ocrResult.Regions.Average(r => r.Score) : 0;
+
+            // 转换识别结果为 Lines 格式
+            if (ocrResult.Regions != null && ocrResult.Regions.Length > 0)
             {
-                result.Success = true;
-                result.Text = ocrResult.Text ?? "";
-                result.Confidence = 0.95f; // PaddleOCR 通常有很高的准确率
-
-                // 转换识别结果
-                if (ocrResult.TextBlocks != null)
+                result.Lines = ocrResult.Regions.Select(region => new OcrLine
                 {
-                    result.Lines = ocrResult.TextBlocks.Select(block => new OcrLine
+                    Text = region.Text ?? "",
+                    Words = new List<OcrWord>
                     {
-                        Text = block.Text ?? "",
-                        Words = new List<OcrWord>
+                        new OcrWord
                         {
-                            new OcrWord
-                            {
-                                Text = block.Text ?? "",
-                                BoundingRect = new Rectangle(
-                                    (int)block.BoxPoints[0].X,
-                                    (int)block.BoxPoints[0].Y,
-                                    (int)(block.BoxPoints[1].X - block.BoxPoints[0].X),
-                                    (int)(block.BoxPoints[3].Y - block.BoxPoints[0].Y)
-                                )
-                            }
+                            Text = region.Text ?? "",
+                            BoundingRect = new Rectangle(
+                                (int)region.Rect.Center.X - (int)(region.Rect.Size.Width / 2),
+                                (int)region.Rect.Center.Y - (int)(region.Rect.Size.Height / 2),
+                                (int)region.Rect.Size.Width,
+                                (int)region.Rect.Size.Height
+                            )
                         }
-                    }).ToList();
-                }
-            }
-            else
-            {
-                result.Success = true;
-                result.Text = "";
+                    }
+                }).ToList();
             }
         }
         catch (Exception ex)
@@ -166,8 +166,26 @@ public class PaddleOcrService : IDisposable
     /// </summary>
     public Task<OcrResult> RecognizeAsync(Bitmap bitmap, string language = "auto")
     {
-        // PaddleOCR 本身是同步的，我们在任务中运行它
         return Task.Run(() => Recognize(bitmap));
+    }
+
+    /// <summary>
+    /// 将 System.Drawing.Bitmap 转换为 OpenCvSharp.Mat
+    /// </summary>
+    private static Mat BitmapToMat(Bitmap bitmap)
+    {
+        // 确保是 24bpp RGB 格式
+        if (bitmap.PixelFormat != PixelFormat.Format24bppRgb)
+        {
+            var converted = new Bitmap(bitmap.Width, bitmap.Height, PixelFormat.Format24bppRgb);
+            using (var g = Graphics.FromImage(converted))
+            {
+                g.DrawImage(bitmap, 0, 0, bitmap.Width, bitmap.Height);
+            }
+            return BitmapConverter.ToMat(converted);
+        }
+
+        return BitmapConverter.ToMat(bitmap);
     }
 
     /// <summary>
@@ -182,7 +200,7 @@ public class PaddleOcrService : IDisposable
     {
         if (_isInitialized)
         {
-            return "PaddleOCR: ✓ 就绪";
+            return "PaddleOCR: ✓ 就绪 (Sdcb v3)";
         }
         else if (_isInitializing)
         {

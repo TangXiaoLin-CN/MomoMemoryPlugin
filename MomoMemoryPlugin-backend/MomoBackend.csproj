@@ -13,15 +13,13 @@
 
   <ItemGroup>
     <PackageReference Include="MinHook.NET" Version="1.1.2" />
-    <PackageReference Include="PaddleOCRSharp" Version="6.0.0" />
+    <!-- 使用 Sdcb.PaddleOCR 替代 PaddleOCRSharp (更可信的开源库) -->
+    <PackageReference Include="Sdcb.PaddleOCR" Version="3.0.1" />
+    <PackageReference Include="Sdcb.PaddleOCR.Models.Local" Version="3.0.1" />
+    <PackageReference Include="Sdcb.PaddleInference.runtime.win64.mkl" Version="3.0.0.36" />
+    <PackageReference Include="OpenCvSharp4" Version="4.11.0.20250507" />
+    <PackageReference Include="OpenCvSharp4.Extensions" Version="4.11.0.20250507" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.11.0.20250507" />
   </ItemGroup>
-
-  <!-- 复制 Paddle 原生 DLL 到输出目录 -->
-  <Target Name="CopyPaddleNativeDlls" AfterTargets="Build">
-    <ItemGroup>
-      <PaddleNativeDlls Include="$(NuGetPackageRoot)paddle.runtime.win_x64\3.2.2\build\win_x64\*.dll" />
-    </ItemGroup>
-    <Copy SourceFiles="@(PaddleNativeDlls)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-  </Target>
 
 </Project>
