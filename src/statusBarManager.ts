@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from './configManager';
 import { WindowManager } from './windowManager';
-import { BackendClient, BackendConfig, BackendClickPoint } from './backendClient';
+import { BackendClient, BackendConfig, BackendClickPoint, BackendOcrBatchResult } from './backendClient';
 
 /**
  * Status Bar Manager - displays OCR results and click buttons from backend config
@@ -393,65 +393,74 @@ export class StatusBarManager {
         return this.ocrResults;
       }
 
-      // Perform OCR on all enabled regions with retry mechanism
-      console.log(`Starting OCR on ${this.backendConfig.ocrRegions.filter(r => r.enabled).length} enabled regions`);
-      console.log(`Current ocrStatusItems keys: ${Array.from(this.ocrStatusItems.keys()).join(', ')}`);
-
+      // Use batch OCR API for parallel processing with OCR pool
       const enabledRegions = this.backendConfig.ocrRegions.filter(r => r.enabled);
-      const maxRetries = 2; // Maximum number of retry rounds for failed regions
-      let regionsToProcess = [...enabledRegions];
+      console.log(`[Batch OCR] Starting parallel OCR on ${enabledRegions.length} enabled regions`);
+
+      const maxRetries = 2;
+      let regionsToProcess = enabledRegions.map(r => ({
+        alias: r.alias,
+        x: r.x,
+        y: r.y,
+        width: r.width,
+        height: r.height,
+        language: r.language || 'auto'
+      }));
 
       for (let retryRound = 0; retryRound <= maxRetries && regionsToProcess.length > 0; retryRound++) {
-        const failedRegions: typeof enabledRegions = [];
-
         if (retryRound > 0) {
-          console.log(`[OCR Retry] Round ${retryRound}: Retrying ${regionsToProcess.length} failed region(s) after 500ms delay`);
-          await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
+          console.log(`[Batch OCR] Retry round ${retryRound}: ${regionsToProcess.length} region(s) after 300ms delay`);
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
 
-        for (const region of regionsToProcess) {
-          try {
-            console.log(`Performing OCR on region: "${region.alias}" (${region.x}, ${region.y}, ${region.width}x${region.height})${retryRound > 0 ? ` [retry ${retryRound}]` : ''}`);
+        try {
+          const batchResult = await this.backendClient.ocrBatch(targetWindow.hwnd, regionsToProcess);
 
-            const result = await this.backendClient.ocr(
-              targetWindow.hwnd,
-              region.x,
-              region.y,
-              region.width,
-              region.height,
-              region.language || 'auto'
-            );
+          if (!batchResult.success) {
+            console.error('[Batch OCR] Batch request failed');
+            break;
+          }
 
-            console.log(`OCR result for "${region.alias}": success=${result.success}, text="${result.text?.substring(0, 50) || ''}", error="${result.errorMessage || ''}"`);
+          console.log(`[Batch OCR] Result: ${batchResult.successCount}/${batchResult.totalCount} succeeded`);
+
+          const failedRegions: typeof regionsToProcess = [];
+
+          // Process results and update UI
+          for (const result of batchResult.results) {
+            const region = enabledRegions.find(r => r.alias === result.alias);
+            if (!region) continue;
 
             if (result.success) {
               const ocrText = result.text || '';
-              this.ocrResults.set(region.alias, ocrText);
+              this.ocrResults.set(result.alias, ocrText);
 
-              // Update the corresponding status item
-              const statusItem = this.ocrStatusItems.get(region.alias);
+              const statusItem = this.ocrStatusItems.get(result.alias);
               if (statusItem) {
-                this.updateOcrStatusItem(statusItem, region.alias, ocrText, region);
-                console.log(`Updated status item for "${region.alias}" with text: "${ocrText?.substring(0, 30) || '--'}"`);
+                this.updateOcrStatusItem(statusItem, result.alias, ocrText, region);
               }
             } else {
-              // OCR failed, add to retry list
-              failedRegions.push(region);
-              console.log(`[OCR] Region "${region.alias}" failed, will retry`);
+              // Add to retry list
+              const regionToRetry = regionsToProcess.find(r => r.alias === result.alias);
+              if (regionToRetry) {
+                failedRegions.push(regionToRetry);
+              }
             }
-          } catch (regionError) {
-            console.error(`OCR failed for region "${region.alias}":`, regionError);
-            failedRegions.push(region);
           }
-        }
 
-        // Update regions to process for next retry round
-        regionsToProcess = failedRegions;
+          regionsToProcess = failedRegions;
+
+          // If all succeeded, break early
+          if (batchResult.allSuccess) {
+            break;
+          }
+        } catch (error) {
+          console.error('[Batch OCR] Error:', error);
+          break;
+        }
       }
 
-      // Log final status
       if (regionsToProcess.length > 0) {
-        console.log(`[OCR] ${regionsToProcess.length} region(s) still failed after ${maxRetries} retries: ${regionsToProcess.map(r => r.alias).join(', ')}`);
+        console.log(`[Batch OCR] ${regionsToProcess.length} region(s) still failed after ${maxRetries} retries`);
       }
 
       return this.ocrResults;

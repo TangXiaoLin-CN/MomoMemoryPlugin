@@ -2,7 +2,7 @@
   "name": "momo-memory-plugin",
   "displayName": "Momo Memory Plugin",
   "description": "Window automation helper - capture window info, record coordinates, OCR text recognition",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "publisher": "momo",
   "engines": {
     "vscode": "^1.85.0"

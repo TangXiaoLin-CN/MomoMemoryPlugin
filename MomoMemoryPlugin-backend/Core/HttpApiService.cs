@@ -127,6 +127,7 @@ public class HttpApiService : IDisposable
                 "/api/window/rect" => HandleGetWindowRect(request),
                 "/api/click" => await HandleClick(request),
                 "/api/ocr" => await HandleOcr(request),
+                "/api/ocr/batch" => await HandleOcrBatch(request),
                 "/api/config" => HandleConfig(request),
                 "/api/status" => HandleStatus(),
                 "/api/cursor" => HandleGetCursor(),
@@ -303,6 +304,105 @@ public class HttpApiService : IDisposable
         }
     }
 
+    /// <summary>
+    /// 批量 OCR - 使用实例池并行处理多个区域
+    /// </summary>
+    private async Task<object> HandleOcrBatch(HttpListenerRequest request)
+    {
+        var body = await ReadRequestBody(request);
+        var batchRequest = JsonSerializer.Deserialize<OcrBatchApiRequest>(body, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        });
+
+        if (batchRequest == null || batchRequest.Regions == null || batchRequest.Regions.Count == 0)
+        {
+            return new { success = false, error = "Invalid request body or empty regions" };
+        }
+
+        var hwnd = (IntPtr)batchRequest.Hwnd;
+        var regions = batchRequest.Regions;
+
+        Log($"[批量OCR] 开始处理 {regions.Count} 个区域 (并行)");
+
+        // 确保 OCR 池有足够的实例
+        PaddleOcrPool.Instance.EnsurePoolSize(regions.Count);
+
+        // 截取所有区域的截图
+        var bitmaps = new List<System.Drawing.Bitmap>();
+        var regionInfos = new List<(string alias, int x, int y, int w, int h)>();
+
+        foreach (var region in regions)
+        {
+            var rect = new System.Drawing.Rectangle(region.X, region.Y, region.Width, region.Height);
+            var bitmap = _screenshotService.CaptureRegion(hwnd, rect);
+
+            if (bitmap != null)
+            {
+                bitmaps.Add(bitmap);
+                regionInfos.Add((region.Alias ?? $"region_{regionInfos.Count}", region.X, region.Y, region.Width, region.Height));
+            }
+        }
+
+        if (bitmaps.Count == 0)
+        {
+            return new { success = false, error = "All screenshots failed" };
+        }
+
+        try
+        {
+            // 并行执行 OCR
+            var ocrResults = await PaddleOcrPool.Instance.RecognizeBatchAsync(bitmaps);
+
+            // 构建返回结果
+            var results = new List<object>();
+            for (int i = 0; i < ocrResults.Count; i++)
+            {
+                var ocrResult = ocrResults[i];
+                var info = regionInfos[i];
+
+                var safeConfidence = ocrResult.Confidence;
+                if (double.IsNaN(safeConfidence) || double.IsInfinity(safeConfidence))
+                {
+                    safeConfidence = 0;
+                }
+
+                Log($"[批量OCR] {info.alias}: ({info.x},{info.y},{info.w}x{info.h}) => {(ocrResult.Success ? ocrResult.Text : "失败")}");
+
+                results.Add(new
+                {
+                    alias = info.alias,
+                    success = ocrResult.Success,
+                    text = ocrResult.Text,
+                    confidence = safeConfidence,
+                    errorMessage = ocrResult.ErrorMessage
+                });
+            }
+
+            var allSuccess = ocrResults.All(r => r.Success);
+            var successCount = ocrResults.Count(r => r.Success);
+
+            Log($"[批量OCR] 完成: {successCount}/{ocrResults.Count} 成功");
+
+            return new
+            {
+                success = true,
+                allSuccess = allSuccess,
+                successCount = successCount,
+                totalCount = ocrResults.Count,
+                results = results
+            };
+        }
+        finally
+        {
+            // 释放所有截图
+            foreach (var bitmap in bitmaps)
+            {
+                bitmap.Dispose();
+            }
+        }
+    }
+
     private object HandleConfig(HttpListenerRequest request)
     {
         if (request.HttpMethod == "GET")
@@ -320,12 +420,14 @@ public class HttpApiService : IDisposable
     private object HandleStatus()
     {
         var ocrStatus = PaddleOcrService.Instance.GetStatus();
+        var poolStatus = PaddleOcrPool.Instance.GetStatus();
         return new
         {
             success = true,
             status = "running",
             port = Port,
             ocrEngine = ocrStatus,
+            ocrPool = poolStatus,
             ocrAvailable = PaddleOcrService.Instance.IsAvailable
         };
     }
@@ -386,6 +488,22 @@ public class ClickApiRequest
 public class OcrApiRequest
 {
     public long Hwnd { get; set; }
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public string? Language { get; set; }
+}
+
+public class OcrBatchApiRequest
+{
+    public long Hwnd { get; set; }
+    public List<OcrRegionRequest> Regions { get; set; } = new();
+}
+
+public class OcrRegionRequest
+{
+    public string? Alias { get; set; }
     public int X { get; set; }
     public int Y { get; set; }
     public int Width { get; set; }

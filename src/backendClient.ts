@@ -29,6 +29,20 @@ export interface BackendOcrResult {
   errorMessage?: string;
 }
 
+export interface BackendOcrBatchResult {
+  success: boolean;
+  allSuccess: boolean;
+  successCount: number;
+  totalCount: number;
+  results: {
+    alias: string;
+    success: boolean;
+    text: string;
+    confidence: number;
+    errorMessage?: string;
+  }[];
+}
+
 export interface BackendStatus {
   success: boolean;
   status: string;
@@ -200,6 +214,19 @@ export class BackendClient {
       height,
       language,
     }, 30000); // 30秒超时
+  }
+
+  /**
+   * Perform batch OCR on multiple regions (parallel processing with OCR pool)
+   */
+  public async ocrBatch(
+    hwnd: number,
+    regions: { alias: string; x: number; y: number; width: number; height: number; language?: string }[]
+  ): Promise<BackendOcrBatchResult> {
+    return this.request<BackendOcrBatchResult>('/api/ocr/batch', 'POST', {
+      hwnd,
+      regions,
+    }, 60000); // 60秒超时（多个区域并行处理）
   }
 
   /**
