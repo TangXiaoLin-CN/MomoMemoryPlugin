@@ -22,7 +22,16 @@
       "Bash(start:*)",
       "Bash(findstr:*)",
       "Bash(dotnet publish:*)",
-      "Bash(copy:*)"
+      "Bash(copy:*)",
+      "WebSearch",
+      "WebFetch(domain:www.nuget.org)",
+      "Bash(git -C \"D:\\\\project\\\\MomoMemoryPlugin\" status)",
+      "Bash(git -C \"D:\\\\project\\\\MomoMemoryPlugin\" log -3 --oneline)",
+      "Bash(git -C \"D:\\\\project\\\\MomoMemoryPlugin\" add MomoMemoryPlugin-backend/Core/PaddleOcrService.cs MomoMemoryPlugin-backend/MomoBackend.csproj)",
+      "Bash(git -C \"D:\\\\project\\\\MomoMemoryPlugin\" commit -m \"$\\(cat <<''EOF''\nfix: 替换 PaddleOCRSharp 为 Sdcb.PaddleOCR 解决关机问题\n\n- 移除可疑的 PaddleOCRSharp 6.0.0 库\n- 使用更可信的 Sdcb.PaddleOCR 3.0.1 \\(github.com/sdcb/PaddleSharp\\)\n- 使用 ChineseV4 本地模型\n- OCR 结果换行符替换为空格\nEOF\n\\)\")",
+      "Bash(.build.bat)",
+      "Bash(git -C \"D:\\\\project\\\\MomoMemoryPlugin\" diff --stat)",
+      "Bash(git -C \"D:\\\\project\\\\MomoMemoryPlugin\" add -A)"
     ]
   }
 }

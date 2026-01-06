@@ -1,14 +1,33 @@
+using System.Runtime.InteropServices;
 using MomoBackend.Core;
+using MomoBackend.Views;
 
 namespace MomoBackend;
 
 static class Program
 {
+    // 用于单实例检测的 Mutex 名称
+    private const string MutexName = "MomoBackend_ConfigWindow_SingleInstance";
+
+    // Windows API for activating existing window
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr FindWindow(string? lpClassName, string lpWindowName);
+
+    private const int SW_RESTORE = 9;
+    private const string ConfigWindowTitle = "Momo 配置管理";
+
     [STAThread]
     static void Main(string[] args)
     {
-        ApplicationConfiguration.Initialize();
-
         // 预热 PaddleOCR 引擎（在后台线程初始化）
         PaddleOcrService.Warmup();
 
@@ -17,13 +36,86 @@ static class Program
 
         if (headless)
         {
-            // 无界面模式：只启动 HTTP API 服务
+            // 无界面模式：只启动 HTTP API 服务（使用 WinForms 保持消息循环）
+            // Headless 模式不需要单实例检测，由插件管理
+            ApplicationConfiguration.Initialize();
             RunHeadless();
         }
         else
         {
-            // 正常模式：显示主窗口
-            Application.Run(new MainForm());
+            // GUI 模式：检查是否已有实例运行
+            using var mutex = new Mutex(true, MutexName, out bool createdNew);
+
+            if (!createdNew)
+            {
+                // 已有实例运行，尝试激活现有窗口
+                ActivateExistingWindow();
+                return;
+            }
+
+            // 解析命令行参数获取目标窗口信息
+            var initialWindowInfo = ParseWindowArgs(args);
+
+            // 正常模式：显示 WPF 主窗口
+            var app = new System.Windows.Application();
+            app.Run(new MainConfigWindow(initialWindowInfo));
+        }
+    }
+
+    /// <summary>
+    /// 解析命令行参数获取目标窗口信息
+    /// </summary>
+    private static InitialWindowInfo? ParseWindowArgs(string[] args)
+    {
+        long hwnd = 0;
+        string? title = null;
+        string? processName = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--hwnd" when i + 1 < args.Length:
+                    long.TryParse(args[++i], out hwnd);
+                    break;
+                case "--title" when i + 1 < args.Length:
+                    title = args[++i];
+                    break;
+                case "--process" when i + 1 < args.Length:
+                    processName = args[++i];
+                    break;
+            }
+        }
+
+        // 只要有任何有效信息就返回
+        if (hwnd != 0 || !string.IsNullOrEmpty(title) || !string.IsNullOrEmpty(processName))
+        {
+            return new InitialWindowInfo
+            {
+                Hwnd = hwnd,
+                Title = title ?? "",
+                ProcessName = processName ?? ""
+            };
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 激活已存在的配置窗口
+    /// </summary>
+    private static void ActivateExistingWindow()
+    {
+        var hwnd = FindWindow(null, ConfigWindowTitle);
+        if (hwnd != IntPtr.Zero)
+        {
+            // 如果窗口最小化了，先恢复
+            if (IsIconic(hwnd))
+            {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            // 激活窗口
+            SetForegroundWindow(hwnd);
         }
     }
 
@@ -61,6 +153,16 @@ static class Program
             httpService.Dispose();
         }
     }
+}
+
+/// <summary>
+/// 初始窗口信息（从命令行传递）
+/// </summary>
+public class InitialWindowInfo
+{
+    public long Hwnd { get; set; }
+    public string Title { get; set; } = "";
+    public string ProcessName { get; set; } = "";
 }
 
 /// <summary>

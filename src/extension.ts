@@ -10,6 +10,7 @@ import { BackendManager } from './backendManager';
 let statusBarManager: StatusBarManager;
 let backendClient: BackendClient;
 let backendManager: BackendManager;
+let configManager: ConfigManager;
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log('Momo Memory Plugin is now active!');
@@ -25,7 +26,7 @@ export async function activate(context: vscode.ExtensionContext) {
   try {
     // Initialize managers
     const windowManager = WindowManager.getInstance();
-    const configManager = ConfigManager.getInstance();
+    configManager = ConfigManager.getInstance();
     statusBarManager = StatusBarManager.getInstance();
     backendClient = BackendClient.getInstance();
     backendManager = BackendManager.getInstance();
@@ -284,8 +285,22 @@ async function openBackendConfigWindow(extensionPath: string): Promise<void> {
   }
 
   try {
+    // Build command line arguments with target window info
+    const args: string[] = [];
+    const targetWindow = configManager.getTargetWindow();
+
+    if (targetWindow.hwnd && targetWindow.hwnd !== 0) {
+      args.push('--hwnd', targetWindow.hwnd.toString());
+    }
+    if (targetWindow.title) {
+      args.push('--title', targetWindow.title);
+    }
+    if (targetWindow.processName) {
+      args.push('--process', targetWindow.processName);
+    }
+
     // Launch backend without --headless to show config window
-    const configProcess = spawn(backendPath, [], {
+    const configProcess = spawn(backendPath, args, {
       cwd: require('path').dirname(backendPath),
       detached: true,
       stdio: 'ignore',
