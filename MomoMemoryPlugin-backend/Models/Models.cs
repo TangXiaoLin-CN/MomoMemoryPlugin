@@ -85,6 +85,16 @@ public class ClickPoint
     public int Y { get; set; }
     public string ClickMode { get; set; } = "fast_background";
     public string Button { get; set; } = "left";
+
+    /// <summary>
+    /// 点击后是否自动刷新OCR区域
+    /// </summary>
+    public bool AutoRefreshOcr { get; set; } = true;
+
+    /// <summary>
+    /// 点击后刷新OCR的延迟时间（毫秒）
+    /// </summary>
+    public int OcrRefreshDelay { get; set; } = 500;
 }
 
 /// <summary>

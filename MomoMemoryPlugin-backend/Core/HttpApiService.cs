@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using MomoBackend.Models;
 
 namespace MomoBackend.Core;
@@ -276,13 +277,23 @@ public class HttpApiService : IDisposable
             // 使用 PaddleOCR
             var result = await PaddleOcrService.Instance.RecognizeAsync(bitmap, ocrRequest.Language ?? "auto");
 
-            Log($"OCR: 区域({ocrRequest.X},{ocrRequest.Y},{ocrRequest.Width}x{ocrRequest.Height}) 结果={result.Text}");
+            // 确保 Confidence 是有效的数值（双重保障）
+            var safeConfidence = result.Confidence;
+            if (double.IsNaN(safeConfidence) || double.IsInfinity(safeConfidence))
+            {
+                safeConfidence = 0;
+                Log($"OCR: 区域({ocrRequest.X},{ocrRequest.Y},{ocrRequest.Width}x{ocrRequest.Height}) 结果={result.Text} (confidence was invalid, reset to 0)");
+            }
+            else
+            {
+                Log($"OCR: 区域({ocrRequest.X},{ocrRequest.Y},{ocrRequest.Width}x{ocrRequest.Height}) 结果={result.Text}");
+            }
 
             return new
             {
                 success = result.Success,
                 text = result.Text,
-                confidence = result.Confidence,
+                confidence = safeConfidence,
                 errorMessage = result.ErrorMessage
             };
         }
@@ -341,7 +352,8 @@ public class HttpApiService : IDisposable
         response.ContentType = "application/json; charset=utf-8";
         var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         });
         var buffer = Encoding.UTF8.GetBytes(json);
         response.ContentLength64 = buffer.Length;

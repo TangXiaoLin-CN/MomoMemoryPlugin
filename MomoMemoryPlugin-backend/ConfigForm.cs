@@ -940,6 +940,10 @@ public class ClickPointEditForm : Form
     private NumericUpDown _yInput = null!;
     private ComboBox _modeCombo = null!;
     private ComboBox _buttonCombo = null!;
+    private CheckBox _autoRefreshOcrCheckbox = null!;
+    private NumericUpDown _ocrRefreshDelayInput = null!;
+    private Label _delayLabel = null!;
+    private Label _delayMsLabel = null!;
 
     public ClickPoint? ClickPoint { get; private set; }
 
@@ -954,13 +958,17 @@ public class ClickPointEditForm : Form
             _yInput.Value = existing.Y;
             _modeCombo.SelectedItem = existing.ClickMode;
             _buttonCombo.SelectedItem = existing.Button;
+            _autoRefreshOcrCheckbox.Checked = existing.AutoRefreshOcr;
+            _ocrRefreshDelayInput.Value = existing.OcrRefreshDelay;
         }
+
+        UpdateDelayInputVisibility();
     }
 
     private void InitializeComponent()
     {
         this.Text = "编辑点击区域";
-        this.Size = new Size(350, 250);
+        this.Size = new Size(350, 320);
         this.StartPosition = FormStartPosition.CenterParent;
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
@@ -992,6 +1000,30 @@ public class ClickPointEditForm : Form
         _buttonCombo = new ComboBox { Location = new Point(inputLeft, y), Width = 100, DropDownStyle = ComboBoxStyle.DropDownList };
         _buttonCombo.Items.AddRange(new object[] { "left", "right" });
         _buttonCombo.SelectedIndex = 0;
+        y += 40;
+
+        // 点击后自动刷新 OCR 复选框
+        _autoRefreshOcrCheckbox = new CheckBox
+        {
+            Text = "点击后自动刷新OCR区域",
+            Location = new Point(20, y),
+            Width = 200,
+            Checked = true
+        };
+        _autoRefreshOcrCheckbox.CheckedChanged += (s, e) => UpdateDelayInputVisibility();
+        y += 30;
+
+        // 延时输入
+        _delayLabel = new Label { Text = "刷新延时:", Location = new Point(40, y + 3), Width = 60 };
+        _ocrRefreshDelayInput = new NumericUpDown
+        {
+            Location = new Point(100, y),
+            Width = 80,
+            Minimum = 0,
+            Maximum = 10000,
+            Value = 500
+        };
+        _delayMsLabel = new Label { Text = "毫秒", Location = new Point(185, y + 3), Width = 40 };
         y += 45;
 
         var okBtn = new Button { Text = "确定", Location = new Point(80, y), Width = 80, DialogResult = DialogResult.OK };
@@ -1005,11 +1037,21 @@ public class ClickPointEditForm : Form
             yLabel, _yInput,
             modeLabel, _modeCombo,
             buttonLabel, _buttonCombo,
+            _autoRefreshOcrCheckbox,
+            _delayLabel, _ocrRefreshDelayInput, _delayMsLabel,
             okBtn, cancelBtn
         });
 
         this.AcceptButton = okBtn;
         this.CancelButton = cancelBtn;
+    }
+
+    private void UpdateDelayInputVisibility()
+    {
+        bool visible = _autoRefreshOcrCheckbox.Checked;
+        _delayLabel.Visible = visible;
+        _ocrRefreshDelayInput.Visible = visible;
+        _delayMsLabel.Visible = visible;
     }
 
     private void OkBtn_Click(object? sender, EventArgs e)
@@ -1027,7 +1069,9 @@ public class ClickPointEditForm : Form
             X = (int)_xInput.Value,
             Y = (int)_yInput.Value,
             ClickMode = _modeCombo.SelectedItem?.ToString() ?? "fast_background",
-            Button = _buttonCombo.SelectedItem?.ToString() ?? "left"
+            Button = _buttonCombo.SelectedItem?.ToString() ?? "left",
+            AutoRefreshOcr = _autoRefreshOcrCheckbox.Checked,
+            OcrRefreshDelay = (int)_ocrRefreshDelayInput.Value
         };
     }
 }

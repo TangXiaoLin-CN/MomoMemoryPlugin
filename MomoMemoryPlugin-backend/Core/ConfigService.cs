@@ -31,13 +31,26 @@ public class ConfigService
 
     public ConfigService(string? configPath = null)
     {
-        // 默认配置文件路径：程序所在目录/momo-config.json
-        _configPath = configPath ?? Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "momo-config.json"
-        );
+        // 配置文件保存到用户 AppData 目录，重装插件不会丢失
+        _configPath = configPath ?? GetUserConfigPath();
+
+        // 确保目录存在
+        var dir = Path.GetDirectoryName(_configPath);
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
 
         _config = Load();
+    }
+
+    /// <summary>
+    /// 获取用户配置文件路径 (%APPDATA%/MomoMemoryPlugin/momo-config.json)
+    /// </summary>
+    private static string GetUserConfigPath()
+    {
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        return Path.Combine(appDataPath, "MomoMemoryPlugin", "momo-config.json");
     }
 
     /// <summary>

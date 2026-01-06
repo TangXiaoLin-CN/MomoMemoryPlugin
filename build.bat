@@ -1,57 +1,77 @@
 @echo off
+chcp 65001 >nul
+setlocal enabledelayedexpansion
+
+:: Parse arguments
+set "NO_PAUSE="
+for %%a in (%*) do (
+    if /i "%%a"=="--no-pause" set "NO_PAUSE=1"
+    if /i "%%a"=="-y" set "NO_PAUSE=1"
+)
+
 echo ========================================
 echo   Momo Memory Plugin Build Script
 echo ========================================
 echo.
 
+:: Check if dotnet is available
+where dotnet >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] dotnet is not installed or not in PATH
+    if not defined NO_PAUSE pause
+    exit /b 1
+)
+
 :: Check if npm is available
 where npm >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] npm is not installed or not in PATH
-    pause
+    if not defined NO_PAUSE pause
     exit /b 1
 )
 
-:: Install dependencies
-echo [1/4] Installing dependencies...
-call npm install
+:: Build and publish backend (self-contained, no .NET runtime required)
+echo [1/4] Building and publishing backend...
+dotnet publish "%~dp0MomoMemoryPlugin-backend\MomoBackend.csproj" -c Release -r win-x64 --self-contained true -o "%~dp0backend"
 if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Failed to install dependencies
-    pause
+    echo [ERROR] Failed to build backend
+    if not defined NO_PAUSE pause
     exit /b 1
 )
+echo [OK] Backend published to backend\
+echo.
+
+:: Install dependencies (optional, skip if node_modules exists)
+if not exist "%~dp0node_modules" (
+    echo [2/4] Installing dependencies...
+    call npm install
+    if %ERRORLEVEL% NEQ 0 (
+        echo [ERROR] Failed to install dependencies
+        if not defined NO_PAUSE pause
+        exit /b 1
+    )
+) else (
+    echo [2/4] Dependencies already installed, skipping...
+)
+echo.
 
 :: Compile TypeScript
-echo.
-echo [2/4] Compiling TypeScript...
+echo [3/4] Compiling TypeScript...
 call npm run compile
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Failed to compile TypeScript
-    pause
+    if not defined NO_PAUSE pause
     exit /b 1
 )
-
-:: Check if vsce is installed
+echo [OK] TypeScript compiled
 echo.
-echo [3/4] Checking vsce...
-where vsce >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo [INFO] vsce not found, installing globally...
-    call npm install -g @vscode/vsce
-    if %ERRORLEVEL% NEQ 0 (
-        echo [ERROR] Failed to install vsce
-        pause
-        exit /b 1
-    )
-)
 
 :: Package extension
-echo.
 echo [4/4] Packaging extension...
-call vsce package --allow-missing-repository
+call npx @vscode/vsce package
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Failed to package extension
-    pause
+    if not defined NO_PAUSE pause
     exit /b 1
 )
 
@@ -60,13 +80,14 @@ echo ========================================
 echo   Build completed successfully!
 echo ========================================
 echo.
-echo VSIX file generated. You can install it in VS Code:
-echo   1. Open VS Code
-echo   2. Press Ctrl+Shift+P
-echo   3. Type "Install from VSIX"
-echo   4. Select the generated .vsix file
+echo VSIX file generated:
+for /f "tokens=*" %%i in ('dir /b /o-d *.vsix 2^>nul') do (
+    echo   %%i
+    goto :showdone
+)
+:showdone
+echo.
+echo Install in VS Code: Ctrl+Shift+P ^> "Install from VSIX"
 echo.
 
-dir /b *.vsix 2>nul
-
-pause
+if not defined NO_PAUSE pause

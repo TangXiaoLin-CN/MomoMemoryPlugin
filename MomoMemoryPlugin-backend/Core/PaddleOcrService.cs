@@ -18,12 +18,18 @@ namespace MomoBackend.Core;
 public class PaddleOcrService : IDisposable
 {
     private static PaddleOcrService? _instance;
-    private static readonly object _lock = new();
+    private static readonly object _instanceLock = new();
+    private static readonly object _ocrLock = new(); // 用于 OCR 操作的锁
 
     private PaddleOcrAll? _engine;
     private bool _isInitialized;
-    private bool _isInitializing;
     private string _initError = "";
+    private int _consecutiveFailures = 0;
+    private const int MaxConsecutiveFailures = 2; // 连续失败2次后重新初始化
+    private DateTime _lastOcrTime = DateTime.MinValue;
+    private const int OcrCooldownMs = 300; // OCR 调用之间的冷却时间（毫秒）- 增加到300ms提高稳定性
+    private DateTime _lastSuccessTime = DateTime.MinValue;
+    private const int EngineIdleResetMs = 10000; // 引擎空闲超过10秒后预防性重置
 
     /// <summary>
     /// 获取单例实例
@@ -34,7 +40,7 @@ public class PaddleOcrService : IDisposable
         {
             if (_instance == null)
             {
-                lock (_lock)
+                lock (_instanceLock)
                 {
                     _instance ??= new PaddleOcrService();
                 }
@@ -45,11 +51,11 @@ public class PaddleOcrService : IDisposable
 
     /// <summary>
     /// 私有构造函数，使用单例模式
+    /// 同步初始化引擎，确保完全就绪后才能使用
     /// </summary>
     private PaddleOcrService()
     {
-        // 延迟初始化，在后台线程中进行
-        Task.Run(() => Initialize());
+        Initialize();
     }
 
     /// <summary>
@@ -63,11 +69,12 @@ public class PaddleOcrService : IDisposable
 
     private void Initialize()
     {
-        if (_isInitialized || _isInitializing) return;
+        if (_isInitialized) return;
 
-        _isInitializing = true;
         try
         {
+            Console.WriteLine("[PaddleOCR] 开始初始化 Sdcb.PaddleOCR 引擎...");
+
             // 使用中文 V4 模型（本地模型，无需下载）
             var model = LocalFullModels.ChineseV4;
 
@@ -79,17 +86,14 @@ public class PaddleOcrService : IDisposable
 
             _isInitialized = true;
             _initError = "";
-            System.Diagnostics.Debug.WriteLine("[PaddleOCR] Sdcb.PaddleOCR 引擎初始化成功 (ChineseV4 模型)");
+            Console.WriteLine("[PaddleOCR] Sdcb.PaddleOCR 引擎初始化成功 (ChineseV4 模型)");
         }
         catch (Exception ex)
         {
             _isInitialized = false;
             _initError = ex.Message;
-            System.Diagnostics.Debug.WriteLine($"[PaddleOCR] 初始化失败: {ex.Message}");
-        }
-        finally
-        {
-            _isInitializing = false;
+            Console.WriteLine($"[PaddleOCR] 初始化失败: {ex.Message}");
+            Console.WriteLine($"[PaddleOCR] 堆栈: {ex.StackTrace}");
         }
     }
 
@@ -100,65 +104,143 @@ public class PaddleOcrService : IDisposable
     {
         var result = new OcrResult();
 
-        // 等待初始化完成（最多等待10秒）
-        var waitCount = 0;
-        while (_isInitializing && waitCount < 100)
+        // 使用锁确保 OCR 操作是线程安全的
+        lock (_ocrLock)
         {
-            Thread.Sleep(100);
-            waitCount++;
-        }
-
-        if (!_isInitialized || _engine == null)
-        {
-            result.Success = false;
-            result.ErrorMessage = _isInitializing
-                ? "PaddleOCR 引擎正在初始化，请稍候..."
-                : $"PaddleOCR 引擎未初始化: {_initError}";
-            return result;
-        }
-
-        try
-        {
-            // 将 Bitmap 转换为 OpenCV Mat
-            using var mat = BitmapToMat(bitmap);
-
-            // 执行 OCR 识别
-            var ocrResult = _engine.Run(mat);
-
-            result.Success = true;
-            // 将换行符替换为空格
-            result.Text = (ocrResult.Text ?? "").Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
-            result.Confidence = ocrResult.Regions.Any() ? ocrResult.Regions.Average(r => r.Score) : 0;
-
-            // 转换识别结果为 Lines 格式
-            if (ocrResult.Regions != null && ocrResult.Regions.Length > 0)
+            // 等待冷却时间，避免调用太频繁
+            var timeSinceLastOcr = (DateTime.Now - _lastOcrTime).TotalMilliseconds;
+            if (timeSinceLastOcr < OcrCooldownMs)
             {
-                result.Lines = ocrResult.Regions.Select(region => new OcrLine
+                var waitTime = (int)(OcrCooldownMs - timeSinceLastOcr);
+                Thread.Sleep(waitTime);
+            }
+
+            // 预防性重置：如果引擎空闲太久，可能需要重新热身
+            var timeSinceLastSuccess = (DateTime.Now - _lastSuccessTime).TotalMilliseconds;
+            if (_lastSuccessTime != DateTime.MinValue && timeSinceLastSuccess > EngineIdleResetMs)
+            {
+                Console.WriteLine($"[PaddleOCR] 引擎空闲 {timeSinceLastSuccess:F0}ms，预防性重置...");
+                ResetEngine();
+            }
+
+            // 检查是否需要重新初始化（连续失败后）
+            if (_consecutiveFailures >= MaxConsecutiveFailures)
+            {
+                Console.WriteLine($"[PaddleOCR] 连续失败 {_consecutiveFailures} 次，尝试重新初始化引擎...");
+                ResetEngine();
+            }
+
+            if (!_isInitialized || _engine == null)
+            {
+                result.Success = false;
+                result.ErrorMessage = string.IsNullOrEmpty(_initError)
+                    ? "PaddleOCR 引擎未初始化"
+                    : $"PaddleOCR 引擎初始化失败: {_initError}";
+                return result;
+            }
+
+            // 尝试执行 OCR，失败则立即重试一次
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                try
                 {
-                    Text = region.Text ?? "",
-                    Words = new List<OcrWord>
+                    // 将 Bitmap 转换为 OpenCV Mat
+                    using var mat = BitmapToMat(bitmap);
+
+                    if (mat.Empty())
                     {
-                        new OcrWord
+                        result.Success = false;
+                        result.ErrorMessage = "图像转换失败：Mat 为空";
+                        _lastOcrTime = DateTime.Now;
+                        return result;
+                    }
+
+                    // 执行 OCR 识别
+                    var ocrResult = _engine.Run(mat);
+
+                    result.Success = true;
+                    // 将换行符替换为空格
+                    result.Text = (ocrResult.Text ?? "").Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
+
+                    // 计算置信度，确保不会产生 Infinity/NaN
+                    var confidence = ocrResult.Regions.Any() ? ocrResult.Regions.Average(r => r.Score) : 0;
+                    result.Confidence = double.IsNaN(confidence) || double.IsInfinity(confidence) ? 0 : confidence;
+
+                    // 转换识别结果为 Lines 格式
+                    if (ocrResult.Regions != null && ocrResult.Regions.Length > 0)
+                    {
+                        result.Lines = ocrResult.Regions.Select(region => new OcrLine
                         {
                             Text = region.Text ?? "",
-                            BoundingRect = new Rectangle(
-                                (int)region.Rect.Center.X - (int)(region.Rect.Size.Width / 2),
-                                (int)region.Rect.Center.Y - (int)(region.Rect.Size.Height / 2),
-                                (int)region.Rect.Size.Width,
-                                (int)region.Rect.Size.Height
-                            )
-                        }
+                            Words = new List<OcrWord>
+                            {
+                                new OcrWord
+                                {
+                                    Text = region.Text ?? "",
+                                    BoundingRect = new Rectangle(
+                                        (int)region.Rect.Center.X - (int)(region.Rect.Size.Width / 2),
+                                        (int)region.Rect.Center.Y - (int)(region.Rect.Size.Height / 2),
+                                        (int)region.Rect.Size.Width,
+                                        (int)region.Rect.Size.Height
+                                    )
+                                }
+                            }
+                        }).ToList();
                     }
-                }).ToList();
+
+                    // 成功后重置失败计数
+                    _consecutiveFailures = 0;
+                    _lastOcrTime = DateTime.Now;
+                    _lastSuccessTime = DateTime.Now;
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    if (attempt == 0)
+                    {
+                        // 第一次失败，等待更长时间再重试
+                        Console.WriteLine($"[PaddleOCR] OCR 识别失败，等待 200ms 后重试: {ex.Message}");
+                        Thread.Sleep(200);
+                        continue;
+                    }
+
+                    // 第二次也失败了
+                    result.Success = false;
+                    result.ErrorMessage = ex.Message;
+                    _consecutiveFailures++;
+                    Console.WriteLine($"[PaddleOCR] OCR 识别失败 (连续第 {_consecutiveFailures} 次): {ex.Message}");
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            result.Success = false;
-            result.ErrorMessage = ex.Message;
+
+            _lastOcrTime = DateTime.Now;
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// 重置并重新初始化引擎
+    /// </summary>
+    private void ResetEngine()
+    {
+        try
+        {
+            Console.WriteLine("[PaddleOCR] 正在重置引擎...");
+            _engine?.Dispose();
+            _engine = null;
+            _isInitialized = false;
+            _consecutiveFailures = 0;
+
+            // 等待一小段时间让资源释放
+            Thread.Sleep(100);
+
+            // 重新初始化
+            Initialize();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PaddleOCR] 重置引擎失败: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -174,47 +256,61 @@ public class PaddleOcrService : IDisposable
     /// </summary>
     private static Mat BitmapToMat(Bitmap bitmap)
     {
-        // 确保是 24bpp RGB 格式
-        if (bitmap.PixelFormat != PixelFormat.Format24bppRgb)
+        try
         {
-            var converted = new Bitmap(bitmap.Width, bitmap.Height, PixelFormat.Format24bppRgb);
-            using (var g = Graphics.FromImage(converted))
+            // 确保是 24bpp RGB 格式
+            if (bitmap.PixelFormat != PixelFormat.Format24bppRgb)
             {
-                g.DrawImage(bitmap, 0, 0, bitmap.Width, bitmap.Height);
+                var converted = new Bitmap(bitmap.Width, bitmap.Height, PixelFormat.Format24bppRgb);
+                using (var g = Graphics.FromImage(converted))
+                {
+                    g.DrawImage(bitmap, 0, 0, bitmap.Width, bitmap.Height);
+                }
+                var mat = BitmapConverter.ToMat(converted);
+                converted.Dispose();
+                return mat;
             }
-            return BitmapConverter.ToMat(converted);
-        }
 
-        return BitmapConverter.ToMat(bitmap);
+            return BitmapConverter.ToMat(bitmap);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PaddleOCR] Bitmap 转 Mat 失败: {ex.Message}");
+            return new Mat();
+        }
     }
 
     /// <summary>
     /// 检查 OCR 是否可用
     /// </summary>
-    public bool IsAvailable => _isInitialized;
+    public bool IsAvailable => _isInitialized && _engine != null;
 
     /// <summary>
     /// 获取引擎状态信息
     /// </summary>
     public string GetStatus()
     {
-        if (_isInitialized)
+        if (_isInitialized && _engine != null)
         {
-            return "PaddleOCR: ✓ 就绪 (Sdcb v3)";
+            return "PaddleOCR: 就绪 (Sdcb v3)";
         }
-        else if (_isInitializing)
+        else if (!string.IsNullOrEmpty(_initError))
         {
-            return "PaddleOCR: ⏳ 初始化中...";
+            return $"PaddleOCR: 错误 ({_initError})";
         }
         else
         {
-            return $"PaddleOCR: ✗ ({_initError})";
+            return "PaddleOCR: 未初始化";
         }
     }
 
     public void Dispose()
     {
-        _engine?.Dispose();
-        _engine = null;
+        lock (_ocrLock)
+        {
+            _engine?.Dispose();
+            _engine = null;
+            _isInitialized = false;
+        }
     }
 }

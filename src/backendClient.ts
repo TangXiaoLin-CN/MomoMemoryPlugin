@@ -74,6 +74,8 @@ export interface BackendClickPoint {
   y: number;
   clickMode: string;
   button: string;
+  autoRefreshOcr: boolean;
+  ocrRefreshDelay: number;
 }
 
 /**
@@ -189,6 +191,7 @@ export class BackendClient {
     height: number,
     language: string = 'auto'
   ): Promise<BackendOcrResult> {
+    // OCR 可能需要较长时间，特别是第一次初始化时，使用更长的超时
     return this.request<BackendOcrResult>('/api/ocr', 'POST', {
       hwnd,
       x,
@@ -196,7 +199,7 @@ export class BackendClient {
       width,
       height,
       language,
-    });
+    }, 30000); // 30秒超时
   }
 
   /**
@@ -217,7 +220,7 @@ export class BackendClient {
   /**
    * Make HTTP request to backend
    */
-  private request<T>(path: string, method: string, body?: any): Promise<T> {
+  private request<T>(path: string, method: string, body?: any, timeout: number = 10000): Promise<T> {
     return new Promise((resolve, reject) => {
       const url = new URL(path, this.baseUrl);
 
@@ -229,7 +232,7 @@ export class BackendClient {
         headers: {
           'Content-Type': 'application/json',
         },
-        timeout: 10000,
+        timeout: timeout,
       };
 
       const req = http.request(options, (res) => {

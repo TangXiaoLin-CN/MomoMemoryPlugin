@@ -25,6 +25,7 @@ export class StatusBarManager {
   // OCR state
   private ocrResults: Map<string, string> = new Map();
   private autoRefreshTimer: NodeJS.Timeout | null = null;
+  private ocrRefreshTimer: NodeJS.Timeout | null = null;  // Debounce timer for click-triggered OCR
   private isRefreshing: boolean = false;
 
   // Backend config cache
@@ -197,7 +198,9 @@ export class StatusBarManager {
    */
   private async updateOcrStatusItems(basePriority?: number): Promise<void> {
     // Clear existing OCR status items
-    for (const [, item] of this.ocrStatusItems) {
+    console.log(`Clearing ${this.ocrStatusItems.size} existing OCR status items`);
+    for (const [alias, item] of this.ocrStatusItems) {
+      console.log(`Disposing OCR status item: ${alias}`);
       item.hide();
       item.dispose();
     }
@@ -221,7 +224,10 @@ export class StatusBarManager {
 
     // Create status items for each OCR region
     for (const region of this.backendConfig.ocrRegions) {
-      if (!region.enabled) continue;
+      if (!region.enabled) {
+        console.log(`Skipping disabled OCR region: ${region.alias}`);
+        continue;
+      }
 
       const statusItem = vscode.window.createStatusBarItem(
         this.alignment,
@@ -235,8 +241,11 @@ export class StatusBarManager {
 
       statusItem.show();
       this.ocrStatusItems.set(region.alias, statusItem);
-      console.log(`Created OCR status item: ${region.alias}`);
+      console.log(`Created OCR status item: "${region.alias}" (priority: ${priority + 1})`);
     }
+
+    console.log(`Total OCR status items created: ${this.ocrStatusItems.size}`);
+    console.log(`OCR status items keys: ${Array.from(this.ocrStatusItems.keys()).join(', ')}`);
   }
 
   /**
@@ -384,29 +393,65 @@ export class StatusBarManager {
         return this.ocrResults;
       }
 
-      // Perform OCR on all enabled regions
-      for (const region of this.backendConfig.ocrRegions) {
-        if (!region.enabled) continue;
+      // Perform OCR on all enabled regions with retry mechanism
+      console.log(`Starting OCR on ${this.backendConfig.ocrRegions.filter(r => r.enabled).length} enabled regions`);
+      console.log(`Current ocrStatusItems keys: ${Array.from(this.ocrStatusItems.keys()).join(', ')}`);
 
-        const result = await this.backendClient.ocr(
-          targetWindow.hwnd,
-          region.x,
-          region.y,
-          region.width,
-          region.height,
-          region.language || 'auto'
-        );
+      const enabledRegions = this.backendConfig.ocrRegions.filter(r => r.enabled);
+      const maxRetries = 2; // Maximum number of retry rounds for failed regions
+      let regionsToProcess = [...enabledRegions];
 
-        const ocrText = result.success ? result.text : '';
-        this.ocrResults.set(region.alias, ocrText);
+      for (let retryRound = 0; retryRound <= maxRetries && regionsToProcess.length > 0; retryRound++) {
+        const failedRegions: typeof enabledRegions = [];
 
-        // Update the corresponding status item
-        const statusItem = this.ocrStatusItems.get(region.alias);
-        if (statusItem) {
-          this.updateOcrStatusItem(statusItem, region.alias, ocrText, region);
-        } else {
-          console.log(`Status item not found for alias: ${region.alias}`);
+        if (retryRound > 0) {
+          console.log(`[OCR Retry] Round ${retryRound}: Retrying ${regionsToProcess.length} failed region(s) after 500ms delay`);
+          await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
         }
+
+        for (const region of regionsToProcess) {
+          try {
+            console.log(`Performing OCR on region: "${region.alias}" (${region.x}, ${region.y}, ${region.width}x${region.height})${retryRound > 0 ? ` [retry ${retryRound}]` : ''}`);
+
+            const result = await this.backendClient.ocr(
+              targetWindow.hwnd,
+              region.x,
+              region.y,
+              region.width,
+              region.height,
+              region.language || 'auto'
+            );
+
+            console.log(`OCR result for "${region.alias}": success=${result.success}, text="${result.text?.substring(0, 50) || ''}", error="${result.errorMessage || ''}"`);
+
+            if (result.success) {
+              const ocrText = result.text || '';
+              this.ocrResults.set(region.alias, ocrText);
+
+              // Update the corresponding status item
+              const statusItem = this.ocrStatusItems.get(region.alias);
+              if (statusItem) {
+                this.updateOcrStatusItem(statusItem, region.alias, ocrText, region);
+                console.log(`Updated status item for "${region.alias}" with text: "${ocrText?.substring(0, 30) || '--'}"`);
+              }
+            } else {
+              // OCR failed, add to retry list
+              failedRegions.push(region);
+              console.log(`[OCR] Region "${region.alias}" failed, will retry`);
+            }
+          } catch (regionError) {
+            console.error(`OCR failed for region "${region.alias}":`, regionError);
+            failedRegions.push(region);
+          }
+        }
+
+        // Update regions to process for next retry round
+        regionsToProcess = failedRegions;
+      }
+
+      // Log final status
+      if (regionsToProcess.length > 0) {
+        console.log(`[OCR] ${regionsToProcess.length} region(s) still failed after ${maxRetries} retries: ${regionsToProcess.map(r => r.alias).join(', ')}`);
       }
 
       return this.ocrResults;
@@ -423,7 +468,7 @@ export class StatusBarManager {
   }
 
   /**
-   * Click a coordinate by alias and refresh OCR
+   * Click a coordinate by alias and optionally refresh OCR
    */
   public async clickCoordinate(alias: string): Promise<void> {
     const targetWindow = this.configManager.getTargetWindow();
@@ -454,10 +499,23 @@ export class StatusBarManager {
     );
 
     if (result.success) {
-      // Small delay then refresh OCR
-      setTimeout(async () => {
-        await this.performOCR();
-      }, 200);
+      // Check if auto refresh OCR is enabled for this click point
+      const autoRefresh = clickPoint.autoRefreshOcr !== false; // default true
+      if (autoRefresh) {
+        const delay = clickPoint.ocrRefreshDelay ?? 500; // default 500ms
+
+        // Debounce: cancel any pending OCR refresh before scheduling a new one
+        // This prevents multiple OCR requests from piling up on rapid clicks
+        if (this.ocrRefreshTimer) {
+          clearTimeout(this.ocrRefreshTimer);
+          this.ocrRefreshTimer = null;
+        }
+
+        this.ocrRefreshTimer = setTimeout(async () => {
+          this.ocrRefreshTimer = null;
+          await this.performOCR();
+        }, delay);
+      }
     } else {
       vscode.window.showErrorMessage(`Click failed: ${result.message}`);
     }
@@ -485,6 +543,12 @@ export class StatusBarManager {
    */
   public dispose(): void {
     this.stopAutoRefresh();
+
+    // Clear any pending OCR refresh timer
+    if (this.ocrRefreshTimer) {
+      clearTimeout(this.ocrRefreshTimer);
+      this.ocrRefreshTimer = null;
+    }
 
     if (this.windowStatusItem) {
       this.windowStatusItem.dispose();
