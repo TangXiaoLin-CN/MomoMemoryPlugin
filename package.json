@@ -4,6 +4,7 @@
   "description": "Window automation helper - capture window info, record coordinates, OCR text recognition",
   "version": "0.0.16",
   "publisher": "momo",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },

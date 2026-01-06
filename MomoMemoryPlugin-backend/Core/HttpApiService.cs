@@ -17,6 +17,7 @@ public class HttpApiService : IDisposable
     private readonly MouseController _mouseController;
     private readonly ScreenshotService _screenshotService;
     private readonly ConfigService _configService;
+    private readonly OcrService _windowsOcrService;  // Windows OCR 服务（用于英文）
     private CancellationTokenSource? _cts;
     private Task? _listenerTask;
     private bool _isRunning;
@@ -35,12 +36,16 @@ public class HttpApiService : IDisposable
         _mouseController = new MouseController();
         _screenshotService = new ScreenshotService();
         _configService = new ConfigService();
+        _windowsOcrService = new OcrService();  // 初始化 Windows OCR
 
         // 连接 MouseController 的日志到本服务的日志
         _mouseController.OnLog += (msg) => Log(msg);
 
         // 将配置同步到 MouseController
         SyncMouseControllerSettings();
+
+        // 记录 Windows OCR 状态
+        Log($"[Windows OCR] {_windowsOcrService.GetStatus()}");
     }
 
     /// <summary>
@@ -276,20 +281,32 @@ public class HttpApiService : IDisposable
 
         try
         {
-            // 使用 PaddleOCR
-            var result = await PaddleOcrService.Instance.RecognizeAsync(bitmap, ocrRequest.Language ?? "auto");
+            var language = ocrRequest.Language?.ToLower() ?? "auto";
+            OcrResult result;
+            string engineUsed;
 
-            // 确保 Confidence 是有效的数值（双重保障）
-            var safeConfidence = result.Confidence;
-            if (double.IsNaN(safeConfidence) || double.IsInfinity(safeConfidence))
+            // 根据语言选择 OCR 引擎
+            // 英文使用 Windows OCR（能正确处理单词空格）
+            // 中文/自动使用 PaddleOCR（中文识别准确度更高）
+            if (language == "en" || language == "english")
             {
-                safeConfidence = 0;
-                Log($"OCR: 区域({ocrRequest.X},{ocrRequest.Y},{ocrRequest.Width}x{ocrRequest.Height}) 结果={result.Text} (confidence was invalid, reset to 0)");
+                result = await _windowsOcrService.RecognizeAsync(bitmap, "en");
+                engineUsed = "Windows";
             }
             else
             {
-                Log($"OCR: 区域({ocrRequest.X},{ocrRequest.Y},{ocrRequest.Width}x{ocrRequest.Height}) 结果={result.Text}");
+                result = await PaddleOcrService.Instance.RecognizeAsync(bitmap, language);
+                engineUsed = "Paddle";
             }
+
+            // 确保 Confidence 是有效的数值（双重保障）
+            var safeConfidence = (double)result.Confidence;
+            if (double.IsNaN(safeConfidence) || double.IsInfinity(safeConfidence))
+            {
+                safeConfidence = 0;
+            }
+
+            Log($"OCR[{engineUsed}]: 区域({ocrRequest.X},{ocrRequest.Y},{ocrRequest.Width}x{ocrRequest.Height}) lang={language} 结果={result.Text}");
 
             return new
             {
@@ -306,7 +323,7 @@ public class HttpApiService : IDisposable
     }
 
     /// <summary>
-    /// 批量 OCR - 使用实例池并行处理多个区域
+    /// 批量 OCR - 根据语言选择引擎：英文用 Windows OCR，中文用 PaddleOCR
     /// </summary>
     private async Task<object> HandleOcrBatch(HttpListenerRequest request)
     {
@@ -324,53 +341,116 @@ public class HttpApiService : IDisposable
         var hwnd = (IntPtr)batchRequest.Hwnd;
         var regions = batchRequest.Regions;
 
-        Log($"[批量OCR] 开始处理 {regions.Count} 个区域 (并行)");
+        Log($"[批量OCR] 开始处理 {regions.Count} 个区域");
 
-        // 确保 OCR 池有足够的实例
-        PaddleOcrPool.Instance.EnsurePoolSize(regions.Count);
+        // 按语言分组区域
+        var englishRegions = new List<(int index, OcrRegionRequest region, System.Drawing.Bitmap? bitmap)>();
+        var chineseRegions = new List<(int index, OcrRegionRequest region, System.Drawing.Bitmap? bitmap)>();
 
-        // 截取所有区域的截图
-        var bitmaps = new List<System.Drawing.Bitmap>();
-        var regionInfos = new List<(string alias, int x, int y, int w, int h)>();
-
-        foreach (var region in regions)
+        for (int i = 0; i < regions.Count; i++)
         {
+            var region = regions[i];
             var rect = new System.Drawing.Rectangle(region.X, region.Y, region.Width, region.Height);
             var bitmap = _screenshotService.CaptureRegion(hwnd, rect);
 
-            if (bitmap != null)
+            var language = region.Language?.ToLower() ?? "auto";
+            if (language == "en" || language == "english")
             {
-                bitmaps.Add(bitmap);
-                regionInfos.Add((region.Alias ?? $"region_{regionInfos.Count}", region.X, region.Y, region.Width, region.Height));
+                englishRegions.Add((i, region, bitmap));
+            }
+            else
+            {
+                chineseRegions.Add((i, region, bitmap));
             }
         }
 
-        if (bitmaps.Count == 0)
-        {
-            return new { success = false, error = "All screenshots failed" };
-        }
+        Log($"[批量OCR] 英文区域: {englishRegions.Count}, 中文/自动区域: {chineseRegions.Count}");
+
+        // 准备结果数组
+        var results = new OcrResult[regions.Count];
+        var regionInfos = new (string alias, int x, int y, int w, int h, string engine)[regions.Count];
 
         try
         {
-            // 并行执行 OCR
-            var ocrResults = await PaddleOcrPool.Instance.RecognizeBatchAsync(bitmaps);
+            // 并行处理英文区域（使用 Windows OCR）
+            var englishTasks = englishRegions
+                .Where(r => r.bitmap != null)
+                .Select(async r =>
+                {
+                    var result = await _windowsOcrService.RecognizeAsync(r.bitmap!, "en");
+                    return (r.index, result);
+                });
+
+            // 处理中文区域（使用 PaddleOCR 批量处理）
+            var chineseBitmaps = chineseRegions
+                .Where(r => r.bitmap != null)
+                .Select(r => r.bitmap!)
+                .ToList();
+
+            var chineseIndices = chineseRegions
+                .Where(r => r.bitmap != null)
+                .Select(r => r.index)
+                .ToList();
+
+            // 确保 OCR 池有足够的实例
+            if (chineseBitmaps.Count > 0)
+            {
+                PaddleOcrPool.Instance.EnsurePoolSize(chineseBitmaps.Count);
+            }
+
+            // 并行执行
+            var englishResultsTask = Task.WhenAll(englishTasks);
+            var chineseResultsTask = chineseBitmaps.Count > 0
+                ? PaddleOcrPool.Instance.RecognizeBatchAsync(chineseBitmaps)
+                : Task.FromResult(new List<OcrResult>());
+
+            await Task.WhenAll(englishResultsTask, chineseResultsTask);
+
+            // 收集英文结果
+            foreach (var (index, result) in await englishResultsTask)
+            {
+                results[index] = result;
+                var region = regions[index];
+                regionInfos[index] = (region.Alias ?? $"region_{index}", region.X, region.Y, region.Width, region.Height, "Windows");
+            }
+
+            // 收集中文结果
+            var chineseResults = await chineseResultsTask;
+            for (int i = 0; i < chineseResults.Count; i++)
+            {
+                var index = chineseIndices[i];
+                results[index] = chineseResults[i];
+                var region = regions[index];
+                regionInfos[index] = (region.Alias ?? $"region_{index}", region.X, region.Y, region.Width, region.Height, "Paddle");
+            }
+
+            // 处理截图失败的区域
+            for (int i = 0; i < regions.Count; i++)
+            {
+                if (results[i] == null)
+                {
+                    results[i] = new OcrResult { Success = false, ErrorMessage = "Screenshot failed" };
+                    var region = regions[i];
+                    regionInfos[i] = (region.Alias ?? $"region_{i}", region.X, region.Y, region.Width, region.Height, "N/A");
+                }
+            }
 
             // 构建返回结果
-            var results = new List<object>();
-            for (int i = 0; i < ocrResults.Count; i++)
+            var outputResults = new List<object>();
+            for (int i = 0; i < results.Length; i++)
             {
-                var ocrResult = ocrResults[i];
+                var ocrResult = results[i];
                 var info = regionInfos[i];
 
-                var safeConfidence = ocrResult.Confidence;
+                var safeConfidence = (double)ocrResult.Confidence;
                 if (double.IsNaN(safeConfidence) || double.IsInfinity(safeConfidence))
                 {
                     safeConfidence = 0;
                 }
 
-                Log($"[批量OCR] {info.alias}: ({info.x},{info.y},{info.w}x{info.h}) => {(ocrResult.Success ? ocrResult.Text : "失败")}");
+                Log($"[批量OCR][{info.engine}] {info.alias}: ({info.x},{info.y},{info.w}x{info.h}) => {(ocrResult.Success ? ocrResult.Text : "失败")}");
 
-                results.Add(new
+                outputResults.Add(new
                 {
                     alias = info.alias,
                     success = ocrResult.Success,
@@ -380,26 +460,30 @@ public class HttpApiService : IDisposable
                 });
             }
 
-            var allSuccess = ocrResults.All(r => r.Success);
-            var successCount = ocrResults.Count(r => r.Success);
+            var allSuccess = results.All(r => r.Success);
+            var successCount = results.Count(r => r.Success);
 
-            Log($"[批量OCR] 完成: {successCount}/{ocrResults.Count} 成功");
+            Log($"[批量OCR] 完成: {successCount}/{results.Length} 成功");
 
             return new
             {
                 success = true,
                 allSuccess = allSuccess,
                 successCount = successCount,
-                totalCount = ocrResults.Count,
-                results = results
+                totalCount = results.Length,
+                results = outputResults
             };
         }
         finally
         {
             // 释放所有截图
-            foreach (var bitmap in bitmaps)
+            foreach (var (_, _, bitmap) in englishRegions)
             {
-                bitmap.Dispose();
+                bitmap?.Dispose();
+            }
+            foreach (var (_, _, bitmap) in chineseRegions)
+            {
+                bitmap?.Dispose();
             }
         }
     }
@@ -420,15 +504,17 @@ public class HttpApiService : IDisposable
 
     private object HandleStatus()
     {
-        var ocrStatus = PaddleOcrService.Instance.GetStatus();
+        var paddleOcrStatus = PaddleOcrService.Instance.GetStatus();
         var poolStatus = PaddleOcrPool.Instance.GetStatus();
+        var windowsOcrStatus = _windowsOcrService.GetStatus();
         return new
         {
             success = true,
             status = "running",
             port = Port,
-            ocrEngine = ocrStatus,
+            ocrEngine = paddleOcrStatus,
             ocrPool = poolStatus,
+            windowsOcr = windowsOcrStatus,
             ocrAvailable = PaddleOcrService.Instance.IsAvailable
         };
     }
