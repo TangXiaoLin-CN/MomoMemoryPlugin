@@ -18,6 +18,7 @@ public class HttpApiService : IDisposable
     private readonly ScreenshotService _screenshotService;
     private readonly ConfigService _configService;
     private readonly OcrService _windowsOcrService;  // Windows OCR 服务（用于英文）
+    private readonly OcrCacheService _cacheService;  // OCR 缓存服务
     private CancellationTokenSource? _cts;
     private Task? _listenerTask;
     private bool _isRunning;
@@ -27,7 +28,7 @@ public class HttpApiService : IDisposable
 
     public event Action<string>? OnLog;
 
-    public HttpApiService(int port = 5678)
+    public HttpApiService(int port = 5679)
     {
         Port = port;
         _listener = new HttpListener();
@@ -37,6 +38,7 @@ public class HttpApiService : IDisposable
         _screenshotService = new ScreenshotService();
         _configService = new ConfigService();
         _windowsOcrService = new OcrService();  // 初始化 Windows OCR
+        _cacheService = OcrCacheService.Instance;  // 初始化缓存服务
 
         // 连接 MouseController 的日志到本服务的日志
         _mouseController.OnLog += (msg) => Log(msg);
@@ -44,8 +46,9 @@ public class HttpApiService : IDisposable
         // 将配置同步到 MouseController
         SyncMouseControllerSettings();
 
-        // 记录 Windows OCR 状态
+        // 记录服务状态
         Log($"[Windows OCR] {_windowsOcrService.GetStatus()}");
+        Log($"[OcrCache] {_cacheService.GetStats()}");
     }
 
     /// <summary>
@@ -273,6 +276,40 @@ public class HttpApiService : IDisposable
             ocrRequest.Height
         );
 
+        // 生成缓存键
+        var language = ocrRequest.Language?.ToLower() ?? "auto";
+        var cacheKey = _cacheService.GenerateCacheKey(
+            ocrRequest.Hwnd,
+            ocrRequest.X,
+            ocrRequest.Y,
+            ocrRequest.Width,
+            ocrRequest.Height,
+            language
+        );
+
+        // 检查缓存
+        var cachedResult = _cacheService.Get(cacheKey);
+        if (cachedResult != null)
+        {
+            // 确保 Confidence 是有效的数值
+            var safeConfidence = (double)cachedResult.Confidence;
+            if (double.IsNaN(safeConfidence) || double.IsInfinity(safeConfidence))
+            {
+                safeConfidence = 0;
+            }
+
+            Log($"OCR[Cache]: 区域({ocrRequest.X},{ocrRequest.Y},{ocrRequest.Width}x{ocrRequest.Height}) lang={language} 结果={cachedResult.Text}");
+
+            return new
+            {
+                success = cachedResult.Success,
+                text = cachedResult.Text,
+                confidence = safeConfidence,
+                errorMessage = cachedResult.ErrorMessage
+            };
+        }
+
+        // 缓存未命中，执行截图和 OCR
         var bitmap = _screenshotService.CaptureRegion((IntPtr)ocrRequest.Hwnd, rect);
         if (bitmap == null)
         {
@@ -281,7 +318,6 @@ public class HttpApiService : IDisposable
 
         try
         {
-            var language = ocrRequest.Language?.ToLower() ?? "auto";
             OcrResult result;
             string engineUsed;
 
@@ -295,8 +331,9 @@ public class HttpApiService : IDisposable
             }
             else
             {
-                result = await PaddleOcrService.Instance.RecognizeAsync(bitmap, language);
-                engineUsed = "Paddle";
+                // 使用实例池而非单例，利用负载均衡和并行处理
+                result = await PaddleOcrPool.Instance.RecognizeAsync(bitmap);
+                engineUsed = "PaddlePool";
             }
 
             // 确保 Confidence 是有效的数值（双重保障）
@@ -304,6 +341,12 @@ public class HttpApiService : IDisposable
             if (double.IsNaN(safeConfidence) || double.IsInfinity(safeConfidence))
             {
                 safeConfidence = 0;
+            }
+
+            // 将结果存入缓存
+            if (result.Success)
+            {
+                _cacheService.Set(cacheKey, result);
             }
 
             Log($"OCR[{engineUsed}]: 区域({ocrRequest.X},{ocrRequest.Y},{ocrRequest.Width}x{ocrRequest.Height}) lang={language} 结果={result.Text}");
@@ -507,6 +550,7 @@ public class HttpApiService : IDisposable
         var paddleOcrStatus = PaddleOcrService.Instance.GetStatus();
         var poolStatus = PaddleOcrPool.Instance.GetStatus();
         var windowsOcrStatus = _windowsOcrService.GetStatus();
+        var cacheStatus = _cacheService.GetStats();
         return new
         {
             success = true,
@@ -515,6 +559,7 @@ public class HttpApiService : IDisposable
             ocrEngine = paddleOcrStatus,
             ocrPool = poolStatus,
             windowsOcr = windowsOcrStatus,
+            ocrCache = cacheStatus,
             ocrAvailable = PaddleOcrService.Instance.IsAvailable
         };
     }
@@ -559,6 +604,7 @@ public class HttpApiService : IDisposable
     {
         Stop();
         _listener.Close();
+        _cacheService.Dispose();
     }
 }
 

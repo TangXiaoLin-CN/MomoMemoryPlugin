@@ -27,7 +27,7 @@ public class PaddleOcrService : IDisposable
     private int _consecutiveFailures = 0;
     private const int MaxConsecutiveFailures = 2; // 连续失败2次后重新初始化
     private DateTime _lastOcrTime = DateTime.MinValue;
-    private const int OcrCooldownMs = 300; // OCR 调用之间的冷却时间（毫秒）- 增加到300ms提高稳定性
+    private const int OcrCooldownMs = 50; // OCR 调用之间的冷却时间（毫秒）- 减少到50ms以提高高频场景性能
     private DateTime _lastSuccessTime = DateTime.MinValue;
     private const int EngineIdleResetMs = 10000; // 引擎空闲超过10秒后预防性重置
 
