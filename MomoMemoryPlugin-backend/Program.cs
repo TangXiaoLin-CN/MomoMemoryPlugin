@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using MomoBackend.Core;
 using MomoBackend.Views;
@@ -25,40 +26,59 @@ static class Program
     private const int SW_RESTORE = 9;
     private const string ConfigWindowTitle = "Momo 配置管理";
 
+    // 崩溃日志路径（与 exe 同目录）
+    private static readonly string CrashLogPath = Path.Combine(
+        AppContext.BaseDirectory, "crash.log");
+
     [STAThread]
     static void Main(string[] args)
     {
-        // 预热 PaddleOCR 引擎（在后台线程初始化）
-        PaddleOcrService.Warmup();
-
-        // 检查是否以无界面模式运行（供插件调用）
-        bool headless = args.Contains("--headless") || args.Contains("-h");
-
-        if (headless)
+        try
         {
-            // 无界面模式：只启动 HTTP API 服务（使用 WinForms 保持消息循环）
-            // Headless 模式不需要单实例检测，由插件管理
-            ApplicationConfiguration.Initialize();
-            RunHeadless();
-        }
-        else
-        {
-            // GUI 模式：检查是否已有实例运行
-            using var mutex = new Mutex(true, MutexName, out bool createdNew);
+            // 检查是否以无界面模式运行（供插件调用）
+            bool headless = args.Contains("--headless") || args.Contains("-h");
 
-            if (!createdNew)
+            if (headless)
             {
-                // 已有实例运行，尝试激活现有窗口
-                ActivateExistingWindow();
-                return;
+                // 无界面模式：只启动 HTTP API 服务（使用 WinForms 保持消息循环）
+                // Headless 模式不需要单实例检测，由插件管理
+                ApplicationConfiguration.Initialize();
+                RunHeadless();
             }
+            else
+            {
+                // GUI 模式：预热 PaddleOCR（GUI 模式下同步初始化，用户可以等待）
+                PaddleOcrService.Warmup();
 
-            // 解析命令行参数获取目标窗口信息
-            var initialWindowInfo = ParseWindowArgs(args);
+                // GUI 模式：检查是否已有实例运行
+                using var mutex = new Mutex(true, MutexName, out bool createdNew);
 
-            // 正常模式：显示 WPF 主窗口
-            var app = new System.Windows.Application();
-            app.Run(new MainConfigWindow(initialWindowInfo));
+                if (!createdNew)
+                {
+                    // 已有实例运行，尝试激活现有窗口
+                    ActivateExistingWindow();
+                    return;
+                }
+
+                // 解析命令行参数获取目标窗口信息
+                var initialWindowInfo = ParseWindowArgs(args);
+
+                // 正常模式：显示 WPF 主窗口
+                var app = new System.Windows.Application();
+                app.Run(new MainConfigWindow(initialWindowInfo));
+            }
+        }
+        catch (Exception ex)
+        {
+            // 将崩溃信息写入日志文件，方便排查
+            try
+            {
+                var log = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] CRASH\n{ex}\n\n";
+                File.AppendAllText(CrashLogPath, log);
+            }
+            catch { /* 日志写入失败也不能再抛异常 */ }
+
+            Console.Error.WriteLine($"[FATAL] {ex}");
         }
     }
 
@@ -124,18 +144,35 @@ static class Program
     /// </summary>
     static void RunHeadless()
     {
-        var httpService = new HttpApiService(5678);
-
-        httpService.OnLog += (msg) =>
-        {
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {msg}");
-        };
-
+        HttpApiService? httpService = null;
         try
         {
+            httpService = new HttpApiService(5678);
+
+            httpService.OnLog += (msg) =>
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {msg}");
+            };
+
+            // 先启动 HTTP 服务器，确保前端健康检查能通过
             httpService.Start();
             Console.WriteLine("Momo Backend running in headless mode...");
             Console.WriteLine("Press Ctrl+C to exit.");
+
+            // HTTP 服务器就绪后，在后台预热 OCR 引擎
+            Task.Run(() =>
+            {
+                try
+                {
+                    Console.WriteLine("[Warmup] 开始后台预热 OCR 引擎...");
+                    PaddleOcrService.Warmup();
+                    Console.WriteLine("[Warmup] PaddleOCR 预热完成");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Warmup] PaddleOCR 预热失败: {ex.Message}");
+                }
+            });
 
             // 保持运行直到收到退出信号
             var exitEvent = new ManualResetEvent(false);
@@ -150,7 +187,7 @@ static class Program
         }
         finally
         {
-            httpService.Dispose();
+            httpService?.Dispose();
         }
     }
 }

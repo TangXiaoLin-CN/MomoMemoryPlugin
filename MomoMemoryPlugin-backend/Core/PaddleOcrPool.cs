@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 using OpenCvSharp;
 using OpenCvSharp.Extensions;
 using Sdcb.PaddleInference;
@@ -134,8 +132,7 @@ public class OcrInstance : IDisposable
                 {
                     if (attempt == 0)
                     {
-                        Console.WriteLine($"[OcrPool] 实例 #{Id}: OCR 失败，重试中... ({ex.Message})");
-                        Thread.Sleep(100);
+                        Console.WriteLine($"[OcrPool] 实例 #{Id}: OCR 失败，立即重试... ({ex.Message})");
                         continue;
                     }
 
@@ -159,7 +156,6 @@ public class OcrInstance : IDisposable
             _isInitialized = false;
             _consecutiveFailures = 0;
             _usageCount = 0;
-            Thread.Sleep(50);
             Initialize();
         }
         catch (Exception ex)
@@ -204,6 +200,7 @@ public class OcrInstance : IDisposable
 
 /// <summary>
 /// PaddleOCR 实例池 - 管理多个独立的 OCR 实例，支持并行处理
+/// 使用固定池大小，避免动态扩缩容导致的竞态条件
 /// </summary>
 public class PaddleOcrPool : IDisposable
 {
@@ -211,21 +208,8 @@ public class PaddleOcrPool : IDisposable
     private static readonly object _instanceLock = new();
 
     private readonly List<OcrInstance> _instances = new();
-    private int _poolSize;
+    private readonly int _poolSize;
     private int _nextInstanceId = 0; // 轮询索引
-    private readonly object _loadBalanceLock = new(); // 负载均衡锁
-    
-    // 动态扩缩容相关
-    private System.Threading.Timer? _scalingTimer;
-    private int _requestCount = 0;
-    private DateTime _lastScalingTime = DateTime.Now;
-    private const int ScalingIntervalMs = 2000; // 扩缩容检查间隔（毫秒）
-    private const int MinPoolSize = 2; // 最小池大小
-    private const int MaxPoolSize = 16; // 最大池大小
-    private const int HighLoadThreshold = 8; // 高负载阈值（每秒请求数）
-    private const int LowLoadThreshold = 3; // 低负载阈值（每秒请求数）
-    private const int ScaleUpIncrement = 2; // 扩容增量
-    private const int ScaleDownDecrement = 1; // 缩容减量
 
     public static PaddleOcrPool Instance
     {
@@ -244,39 +228,13 @@ public class PaddleOcrPool : IDisposable
 
     private PaddleOcrPool()
     {
-        // 根据 CPU 核心数设置默认池大小，最少 2 个实例，最多不超过 MaxPoolSize
-        int defaultSize = Math.Min(Math.Max(2, Environment.ProcessorCount - 1), MaxPoolSize);
-        Console.WriteLine($"[OcrPool] 根据 CPU 核心数 ({Environment.ProcessorCount}) 设置默认池大小: {defaultSize} (限制在 {MinPoolSize}-{MaxPoolSize} 之间)");
-        EnsurePoolSize(defaultSize);
-        
-        // 启动动态扩缩容定时器
-        _scalingTimer = new System.Threading.Timer(
-            (state) => CheckScaling(),
-            null,
-            ScalingIntervalMs,
-            ScalingIntervalMs
-        );
-    }
+        // 固定池大小：基于 CPU 核心数，最少 2 个，最多 8 个
+        _poolSize = Math.Min(Math.Max(2, Environment.ProcessorCount - 1), 8);
+        Console.WriteLine($"[OcrPool] CPU 核心数: {Environment.ProcessorCount}, 固定池大小: {_poolSize}");
 
-    /// <summary>
-    /// 确保池中至少有指定数量的实例
-    /// </summary>
-    public void EnsurePoolSize(int size)
-    {
-        lock (_instanceLock)
+        for (int i = 0; i < _poolSize; i++)
         {
-            // 限制池大小不超过最大值
-            size = Math.Min(size, MaxPoolSize);
-            
-            if (size <= _poolSize) return;
-
-            Console.WriteLine($"[OcrPool] 扩展实例池: {_poolSize} -> {size}");
-
-            for (int i = _poolSize; i < size; i++)
-            {
-                _instances.Add(new OcrInstance(i));
-            }
-            _poolSize = size;
+            _instances.Add(new OcrInstance(i));
         }
     }
 
@@ -286,29 +244,17 @@ public class PaddleOcrPool : IDisposable
     public int PoolSize => _poolSize;
 
     /// <summary>
-    /// 使用指定实例执行单个 OCR
-    /// </summary>
-    public OcrResult Recognize(int instanceId, Bitmap bitmap)
-    {
-        if (instanceId < 0 || instanceId >= _poolSize)
-        {
-            return new OcrResult { Success = false, ErrorMessage = $"无效的实例ID: {instanceId}" };
-        }
-
-        return _instances[instanceId].Recognize(bitmap);
-    }
-
-    /// <summary>
-    /// 使用负载均衡执行单个 OCR
+    /// 使用轮询负载均衡执行单个 OCR
     /// </summary>
     public OcrResult Recognize(Bitmap bitmap)
     {
-        // 增加请求计数
-        Interlocked.Increment(ref _requestCount);
-        
-        // 轮询选择实例
-        int instanceId = GetNextInstanceId();
-        return Recognize(instanceId, bitmap);
+        int instanceId;
+        lock (_instanceLock)
+        {
+            instanceId = _nextInstanceId;
+            _nextInstanceId = (_nextInstanceId + 1) % _poolSize;
+        }
+        return _instances[instanceId].Recognize(bitmap);
     }
 
     /// <summary>
@@ -316,9 +262,6 @@ public class PaddleOcrPool : IDisposable
     /// </summary>
     public Task<OcrResult> RecognizeAsync(Bitmap bitmap)
     {
-        // 增加请求计数
-        Interlocked.Increment(ref _requestCount);
-        
         return Task.Run(() => Recognize(bitmap));
     }
 
@@ -327,57 +270,17 @@ public class PaddleOcrPool : IDisposable
     /// </summary>
     public async Task<List<OcrResult>> RecognizeBatchAsync(List<Bitmap> bitmaps)
     {
-        // 确保池大小足够
-        EnsurePoolSize(bitmaps.Count);
-
         var tasks = new List<Task<OcrResult>>();
 
         for (int i = 0; i < bitmaps.Count; i++)
         {
-            var instanceId = i % _poolSize; // 循环使用实例
+            var instanceId = i % _poolSize;
             var bitmap = bitmaps[i];
-
             tasks.Add(Task.Run(() => _instances[instanceId].Recognize(bitmap)));
         }
 
         var results = await Task.WhenAll(tasks);
         return results.ToList();
-    }
-
-    /// <summary>
-    /// 获取下一个实例 ID（轮询策略）
-    /// </summary>
-    private int GetNextInstanceId()
-    {
-        lock (_loadBalanceLock)
-        {
-            int instanceId = _nextInstanceId;
-            _nextInstanceId = (_nextInstanceId + 1) % _poolSize;
-            return instanceId;
-        }
-    }
-
-    /// <summary>
-    /// 获取最少使用的实例 ID（最少使用策略）
-    /// </summary>
-    private int GetLeastUsedInstanceId()
-    {
-        lock (_loadBalanceLock)
-        {
-            int minUsage = int.MaxValue;
-            int bestInstanceId = 0;
-
-            for (int i = 0; i < _poolSize; i++)
-            {
-                if (_instances[i].IsAvailable && _instances[i].UsageCount < minUsage)
-                {
-                    minUsage = _instances[i].UsageCount;
-                    bestInstanceId = i;
-                }
-            }
-
-            return bestInstanceId;
-        }
     }
 
     /// <summary>
@@ -387,103 +290,18 @@ public class PaddleOcrPool : IDisposable
     {
         var available = _instances.Count(i => i.IsAvailable);
         var usageCounts = string.Join(", ", _instances.Select(i => $"#{i.Id}:{i.UsageCount}"));
-        double requestRate = CalculateRequestRate();
-        return $"OcrPool: {available}/{_poolSize} 实例可用 | 使用计数: [{usageCounts}] | 请求率: {requestRate:F2}/s";
-    }
-
-    /// <summary>
-    /// 检查并执行动态扩缩容
-    /// </summary>
-    private void CheckScaling()
-    {
-        lock (_instanceLock)
-        {
-            double requestRate = CalculateRequestRate();
-            var now = DateTime.Now;
-            
-            // 重置请求计数
-            Interlocked.Exchange(ref _requestCount, 0);
-            _lastScalingTime = now;
-            
-            Console.WriteLine($"[OcrPool] 负载检查: 请求率 {requestRate:F2}/s, 当前池大小 {_poolSize}");
-            
-            // 扩容逻辑
-            if (requestRate > HighLoadThreshold && _poolSize < MaxPoolSize)
-            {
-                int newSize = Math.Min(_poolSize + ScaleUpIncrement, MaxPoolSize);
-                Console.WriteLine($"[OcrPool] 高负载检测到，扩容: {_poolSize} -> {newSize}");
-                EnsurePoolSize(newSize);
-            }
-            // 缩容逻辑
-            else if (requestRate < LowLoadThreshold && _poolSize > MinPoolSize)
-            {
-                int newSize = Math.Max(_poolSize - ScaleDownDecrement, MinPoolSize);
-                Console.WriteLine($"[OcrPool] 低负载检测到，缩容: {_poolSize} -> {newSize}");
-                // 缩容实现（需要安全移除实例）
-                ReducePoolSize(newSize);
-            }
-            else if (_poolSize > MaxPoolSize)
-            {
-                // 紧急缩容：如果池大小超过最大值，强制缩容
-                Console.WriteLine($"[OcrPool] 池大小超过最大值，紧急缩容: {_poolSize} -> {MaxPoolSize}");
-                ReducePoolSize(MaxPoolSize);
-            }
-        }
-    }
-
-    /// <summary>
-    /// 计算当前请求率（每秒请求数）
-    /// </summary>
-    private double CalculateRequestRate()
-    {
-        var now = DateTime.Now;
-        var elapsedSeconds = (now - _lastScalingTime).TotalSeconds;
-        if (elapsedSeconds < 0.1) // 避免除以零
-            return 0;
-        
-        int currentRequests = Interlocked.CompareExchange(ref _requestCount, 0, 0);
-        return currentRequests / elapsedSeconds;
-    }
-
-    /// <summary>
-    /// 减少池大小
-    /// </summary>
-    private void ReducePoolSize(int targetSize)
-    {
-        if (targetSize >= _poolSize || targetSize < MinPoolSize)
-            return;
-        
-        Console.WriteLine($"[OcrPool] 缩容到 {targetSize} 个实例");
-        
-        // 按使用计数排序，移除使用最少的实例
-        var instancesToRemove = _instances
-            .OrderBy(i => i.UsageCount)
-            .Take(_poolSize - targetSize)
-            .ToList();
-        
-        foreach (var instance in instancesToRemove)
-        {
-            Console.WriteLine($"[OcrPool] 移除实例 #{instance.Id}");
-            instance.Dispose();
-            _instances.Remove(instance);
-        }
-        
-        _poolSize = targetSize;
-        Console.WriteLine($"[OcrPool] 缩容完成，当前池大小: {_poolSize}");
+        return $"OcrPool: {available}/{_poolSize} 实例可用 | 使用计数: [{usageCounts}]";
     }
 
     public void Dispose()
     {
         lock (_instanceLock)
         {
-            _scalingTimer?.Dispose();
-            
             foreach (var instance in _instances)
             {
                 instance.Dispose();
             }
             _instances.Clear();
-            _poolSize = 0;
         }
     }
 }

@@ -17,8 +17,9 @@ public class HttpApiService : IDisposable
     private readonly MouseController _mouseController;
     private readonly ScreenshotService _screenshotService;
     private readonly ConfigService _configService;
-    private readonly OcrService _windowsOcrService;  // Windows OCR 服务（用于英文）
+    private readonly OcrService _englishOcrService;  // OCR 服务（统一使用 PaddleOCR）
     private readonly OcrCacheService _cacheService;  // OCR 缓存服务
+    private readonly SemaphoreSlim _ocrSemaphore = new(1, 1); // OCR 请求限流：同一时刻只处理一个 OCR 请求
     private CancellationTokenSource? _cts;
     private Task? _listenerTask;
     private bool _isRunning;
@@ -37,8 +38,8 @@ public class HttpApiService : IDisposable
         _mouseController = new MouseController();
         _screenshotService = new ScreenshotService();
         _configService = new ConfigService();
-        _windowsOcrService = new OcrService();  // 初始化 Windows OCR
         _cacheService = OcrCacheService.Instance;  // 初始化缓存服务
+        _englishOcrService = new OcrService();
 
         // 连接 MouseController 的日志到本服务的日志
         _mouseController.OnLog += (msg) => Log(msg);
@@ -46,8 +47,7 @@ public class HttpApiService : IDisposable
         // 将配置同步到 MouseController
         SyncMouseControllerSettings();
 
-        // 记录服务状态
-        Log($"[Windows OCR] {_windowsOcrService.GetStatus()}");
+        Log($"[OCR] {_englishOcrService.GetStatus()}");
         Log($"[OcrCache] {_cacheService.GetStats()}");
     }
 
@@ -268,6 +268,11 @@ public class HttpApiService : IDisposable
             return new { success = false, error = "Invalid request body" };
         }
 
+        // 限流：等待信号量，防止并发截图+OCR导致的竞态
+        await _ocrSemaphore.WaitAsync();
+        try
+        {
+
         // 截取窗口区域
         var rect = new System.Drawing.Rectangle(
             ocrRequest.X,
@@ -321,13 +326,11 @@ public class HttpApiService : IDisposable
             OcrResult result;
             string engineUsed;
 
-            // 根据语言选择 OCR 引擎
-            // 英文使用 Windows OCR（能正确处理单词空格）
-            // 中文/自动使用 PaddleOCR（中文识别准确度更高）
-            if (language == "en" || language == "english")
+            // 统一使用 PaddleOCR 处理所有语言
+            if ((language == "en" || language == "english"))
             {
-                result = await _windowsOcrService.RecognizeAsync(bitmap, "en");
-                engineUsed = "Windows";
+                result = await _englishOcrService.RecognizeAsync(bitmap, "en");
+                engineUsed = "PaddleOCR";
             }
             else
             {
@@ -363,10 +366,15 @@ public class HttpApiService : IDisposable
         {
             bitmap.Dispose();
         }
+        }
+        finally
+        {
+            _ocrSemaphore.Release();
+        }
     }
 
     /// <summary>
-    /// 批量 OCR - 根据语言选择引擎：英文用 Windows OCR，中文用 PaddleOCR
+    /// 批量 OCR - 根据语言选择引擎：英文用 Tesseract OCR，中文用 PaddleOCR
     /// </summary>
     private async Task<object> HandleOcrBatch(HttpListenerRequest request)
     {
@@ -381,6 +389,10 @@ public class HttpApiService : IDisposable
             return new { success = false, error = "Invalid request body or empty regions" };
         }
 
+        // 限流：等待信号量，防止并发截图+OCR导致的竞态
+        await _ocrSemaphore.WaitAsync();
+        try
+        {
         var hwnd = (IntPtr)batchRequest.Hwnd;
         var regions = batchRequest.Regions;
 
@@ -415,12 +427,12 @@ public class HttpApiService : IDisposable
 
         try
         {
-            // 并行处理英文区域（使用 Windows OCR）
+            // 并行处理英文区域（使用 Tesseract OCR）
             var englishTasks = englishRegions
                 .Where(r => r.bitmap != null)
                 .Select(async r =>
                 {
-                    var result = await _windowsOcrService.RecognizeAsync(r.bitmap!, "en");
+                    var result = await _englishOcrService.RecognizeAsync(r.bitmap!, "en");
                     return (r.index, result);
                 });
 
@@ -435,12 +447,6 @@ public class HttpApiService : IDisposable
                 .Select(r => r.index)
                 .ToList();
 
-            // 确保 OCR 池有足够的实例
-            if (chineseBitmaps.Count > 0)
-            {
-                PaddleOcrPool.Instance.EnsurePoolSize(chineseBitmaps.Count);
-            }
-
             // 并行执行
             var englishResultsTask = Task.WhenAll(englishTasks);
             var chineseResultsTask = chineseBitmaps.Count > 0
@@ -454,7 +460,7 @@ public class HttpApiService : IDisposable
             {
                 results[index] = result;
                 var region = regions[index];
-                regionInfos[index] = (region.Alias ?? $"region_{index}", region.X, region.Y, region.Width, region.Height, "Windows");
+                regionInfos[index] = (region.Alias ?? $"region_{index}", region.X, region.Y, region.Width, region.Height, "Tesseract");
             }
 
             // 收集中文结果
@@ -529,6 +535,11 @@ public class HttpApiService : IDisposable
                 bitmap?.Dispose();
             }
         }
+        }
+        finally
+        {
+            _ocrSemaphore.Release();
+        }
     }
 
     private object HandleConfig(HttpListenerRequest request)
@@ -549,7 +560,7 @@ public class HttpApiService : IDisposable
     {
         var paddleOcrStatus = PaddleOcrService.Instance.GetStatus();
         var poolStatus = PaddleOcrPool.Instance.GetStatus();
-        var windowsOcrStatus = _windowsOcrService.GetStatus();
+        var windowsOcrStatus = _englishOcrService.GetStatus();
         var cacheStatus = _cacheService.GetStats();
         return new
         {

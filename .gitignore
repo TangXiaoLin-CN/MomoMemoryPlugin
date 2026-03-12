@@ -30,6 +30,9 @@ Thumbs.db
 .specstory/
 .claude/
 
+# Build output
+build/
+
 # Build artifacts
 *.nupkg
 

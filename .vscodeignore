@@ -13,17 +13,50 @@ tsconfig.json
 **/*.ts
 !*.d.ts
 
-# Node modules that aren't needed at runtime
-node_modules/@types/**
-node_modules/typescript/**
-node_modules/robotjs/**
+# All node_modules (no runtime npm deps needed)
+node_modules/**
+
+# Unused frontend OCR module (all OCR handled by backend)
+out/ocrService.js
 
 # Backend source folder (we use backend/ with published binaries)
 MomoMemoryPlugin-backend/**
 
-# Build scripts
+# Unused OpenCV video module
+backend/opencv_videoio_ffmpeg*.dll
+
+# Tesseract (removed, conflicts with PaddleInference)
+backend/x64/**
+backend/tessdata/**
+backend/TesseractOCR.dll
+
+# Debug symbols
+backend/*.pdb
+
+# Unused x86 runtime and duplicate runtimes (self-contained publish copies to root)
+backend/runtimes/**
+backend/x86/**
+
+# .NET locale satellite assemblies (not needed for UI)
+backend/cs/**
+backend/de/**
+backend/es/**
+backend/fr/**
+backend/it/**
+backend/ja/**
+backend/ko/**
+backend/pl/**
+backend/pt-BR/**
+backend/ru/**
+backend/tr/**
+backend/zh-Hans/**
+backend/zh-Hant/**
+
+# Build scripts and output
 build.bat
 build.sh
+build.ps1
+build/**
 
 # Documentation
 docs/**
@@ -31,5 +64,3 @@ docs/**
 # Misc
 nul
 *.vsix
-
-# Keep backend/ folder with published binaries

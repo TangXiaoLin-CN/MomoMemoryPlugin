@@ -9,6 +9,9 @@ namespace MomoBackend.Core;
 /// </summary>
 public class ScreenshotService
 {
+    // 全局截图锁：防止并发窗口状态操作（ShowWindow/SetLayeredWindowAttributes）互相干扰
+    private static readonly object _captureLock = new();
+
     [DllImport("user32.dll")]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
 
@@ -68,80 +71,84 @@ public class ScreenshotService
         if (hwnd == IntPtr.Zero)
             return null;
 
-        bool wasMinimized = IsIconic(hwnd);
-        bool wasHidden = !IsWindowVisible(hwnd);
-        int originalExStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-        bool wasLayered = (originalExStyle & WS_EX_LAYERED) != 0;
-
-        try
+        // 串行化所有窗口截图操作，防止并发操作窗口状态导致截图失败
+        lock (_captureLock)
         {
-            // 如果窗口最小化或隐藏，需要临时恢复（设为透明）
-            if (wasMinimized || wasHidden)
+            bool wasMinimized = IsIconic(hwnd);
+            bool wasHidden = !IsWindowVisible(hwnd);
+            int originalExStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+            bool wasLayered = (originalExStyle & WS_EX_LAYERED) != 0;
+
+            try
             {
-                // 先设置透明
-                if (!wasLayered)
+                // 如果窗口最小化或隐藏，需要临时恢复（设为透明）
+                if (wasMinimized || wasHidden)
                 {
-                    SetWindowLong(hwnd, GWL_EXSTYLE, originalExStyle | WS_EX_LAYERED);
-                }
-                SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
-
-                if (wasHidden)
-                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                if (wasMinimized)
-                    ShowWindow(hwnd, SW_RESTORE);
-
-                Thread.Sleep(50); // 等待窗口恢复
-            }
-
-            // 获取窗口尺寸
-            if (!GetWindowRect(hwnd, out RECT windowRect))
-                return null;
-
-            int width = windowRect.Right - windowRect.Left;
-            int height = windowRect.Bottom - windowRect.Top;
-
-            if (width <= 0 || height <= 0)
-                return null;
-
-            // 创建位图
-            var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-
-            using (var graphics = Graphics.FromImage(bitmap))
-            {
-                IntPtr hdc = graphics.GetHdc();
-                try
-                {
-                    // 使用 PrintWindow 捕获窗口（即使被遮挡也能捕获）
-                    // PW_RENDERFULLCONTENT 用于捕获 DirectX/OpenGL 内容
-                    if (!PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT))
+                    // 先设置透明
+                    if (!wasLayered)
                     {
-                        // 如果失败，尝试普通模式
-                        PrintWindow(hwnd, hdc, 0);
+                        SetWindowLong(hwnd, GWL_EXSTYLE, originalExStyle | WS_EX_LAYERED);
+                    }
+                    SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
+
+                    if (wasHidden)
+                        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                    if (wasMinimized)
+                        ShowWindow(hwnd, SW_RESTORE);
+
+                    Thread.Sleep(50); // 等待窗口恢复
+                }
+
+                // 获取窗口尺寸
+                if (!GetWindowRect(hwnd, out RECT windowRect))
+                    return null;
+
+                int width = windowRect.Right - windowRect.Left;
+                int height = windowRect.Bottom - windowRect.Top;
+
+                if (width <= 0 || height <= 0)
+                    return null;
+
+                // 创建位图
+                var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+
+                using (var graphics = Graphics.FromImage(bitmap))
+                {
+                    IntPtr hdc = graphics.GetHdc();
+                    try
+                    {
+                        // 使用 PrintWindow 捕获窗口（即使被遮挡也能捕获）
+                        // PW_RENDERFULLCONTENT 用于捕获 DirectX/OpenGL 内容
+                        if (!PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT))
+                        {
+                            // 如果失败，尝试普通模式
+                            PrintWindow(hwnd, hdc, 0);
+                        }
+                    }
+                    finally
+                    {
+                        graphics.ReleaseHdc(hdc);
                     }
                 }
-                finally
-                {
-                    graphics.ReleaseHdc(hdc);
-                }
+
+                return bitmap;
             }
-
-            return bitmap;
-        }
-        finally
-        {
-            // 恢复窗口状态
-            if (wasMinimized || wasHidden)
+            finally
             {
-                if (wasMinimized)
-                    ShowWindow(hwnd, SW_MINIMIZE);
-                if (wasHidden)
-                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-
-                // 恢复透明度
-                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
-                if (!wasLayered)
+                // 恢复窗口状态
+                if (wasMinimized || wasHidden)
                 {
-                    SetWindowLong(hwnd, GWL_EXSTYLE, originalExStyle);
+                    if (wasMinimized)
+                        ShowWindow(hwnd, SW_MINIMIZE);
+                    if (wasHidden)
+                        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+
+                    // 恢复透明度
+                    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+                    if (!wasLayered)
+                    {
+                        SetWindowLong(hwnd, GWL_EXSTYLE, originalExStyle);
+                    }
                 }
             }
         }

@@ -25,10 +25,11 @@ public partial class TestWindow : Window
     private readonly WindowManager _windowManager;
     private readonly MouseController _mouseController;
     private readonly ScreenshotService _screenshotService;
-    private readonly OcrService _windowsOcrService;
+    private readonly OcrService _ocrService;
 
     private readonly List<ClickTestItem> _clickTestItems = new();
     private readonly List<OcrTestItem> _ocrTestItems = new();
+    private volatile bool _isOcrBusy = false; // 防止 OCR 重叠调用
 
     private DispatcherTimer? _mouseTimer;
     private DispatcherTimer? _ocrTimer;
@@ -42,7 +43,7 @@ public partial class TestWindow : Window
         _windowManager = new WindowManager();
         _mouseController = new MouseController();
         _screenshotService = new ScreenshotService();
-        _windowsOcrService = new OcrService();
+        _ocrService = new OcrService();
 
         // 设置窗口信息
         if (_selectedWindow != null)
@@ -335,6 +336,12 @@ public partial class TestWindow : Window
             return;
         }
 
+        if (_isOcrBusy)
+        {
+            Log("提示: 上一次识别尚未完成，请稍候");
+            return;
+        }
+
         if (OcrTestDataGrid.SelectedItem is not OcrTestItem item)
         {
             MessageBox.Show("请先选择要测试的 OCR 区域", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -349,6 +356,12 @@ public partial class TestWindow : Window
         if (_selectedWindow == null)
         {
             Log("错误: 未选择目标窗口");
+            return;
+        }
+
+        if (_isOcrBusy)
+        {
+            Log("提示: 上一次识别尚未完成，请稍候");
             return;
         }
 
@@ -367,10 +380,13 @@ public partial class TestWindow : Window
     {
         if (_selectedWindow == null) return;
 
-        item.Status = "识别中...";
-        RefreshOcrTestList();
+        _isOcrBusy = true;
+        try
+        {
+            item.Status = "识别中...";
+            RefreshOcrTestList();
 
-        var engineName = _config.OcrEngine == "paddle" ? "PaddleOCR" : "Windows OCR";
+        var engineName = _config.OcrEngine == "paddle" ? "PaddleOCR" : "Tesseract";
         Log($"识别 {item.Alias}: {item.RegionDisplay} [{engineName}]");
 
         var rect = new Rectangle(item.Region.X, item.Region.Y, item.Region.Width, item.Region.Height);
@@ -401,7 +417,7 @@ public partial class TestWindow : Window
             }
             else
             {
-                result = await _windowsOcrService.RecognizeAsync(bitmap, langCode);
+                result = await _ocrService.RecognizeAsync(bitmap, langCode);
             }
 
             if (result.Success)
@@ -423,6 +439,11 @@ public partial class TestWindow : Window
         }
 
         RefreshOcrTestList();
+        }
+        finally
+        {
+            _isOcrBusy = false;
+        }
     }
 
     private void RefreshOcrTestList()
@@ -457,7 +478,7 @@ public partial class TestWindow : Window
         };
         _ocrTimer.Tick += async (s, e) =>
         {
-            if (_selectedWindow != null)
+            if (_selectedWindow != null && !_isOcrBusy)
             {
                 foreach (var item in _ocrTestItems)
                 {

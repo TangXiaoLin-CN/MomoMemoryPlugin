@@ -2,7 +2,7 @@
   "name": "momo-memory-plugin",
   "displayName": "Momo Memory Plugin",
   "description": "Window automation helper - capture window info, record coordinates, OCR text recognition",
-  "version": "0.0.16",
+  "version": "0.0.7",
   "publisher": "momo",
   "icon": "icon.png",
   "engines": {
@@ -106,7 +106,10 @@
         },
         "momo.statusBarAlignment": {
           "type": "string",
-          "enum": ["left", "right"],
+          "enum": [
+            "left",
+            "right"
+          ],
           "default": "left",
           "description": "Status bar alignment (left or right)"
         }
@@ -123,10 +126,6 @@
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0"
-  },
-  "dependencies": {
-    "tesseract.js": "^5.0.4",
-    "regenerator-runtime": "^0.14.1"
   },
   "optionalDependencies": {
     "robotjs": "^0.6.0"
